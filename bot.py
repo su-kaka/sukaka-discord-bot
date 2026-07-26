@@ -18,7 +18,7 @@ ALLOWED_CHANNEL_ID = 1293095144806940738
 DEFAULT_TIMEOUT_MINUTES = 30
 MAX_TIMEOUT_MINUTES = 24 * 60
 VOTE_THRESHOLD = 5
-KEEPALIVE_HOST = "127.0.0.1"
+KEEPALIVE_HOST = "0.0.0.0"
 KEEPALIVE_PORT = 7861
 
 MESSAGE_LINK_PATTERN = re.compile(
@@ -52,7 +52,7 @@ class KeepAliveHandler(BaseHTTPRequestHandler):
             "box-shadow:0 8px 24px rgba(0,0,0,.08);max-width:560px;}"
             "h1{margin:0 0 8px 0;font-size:26px;}p{margin:0;color:#555;line-height:1.6;}</style>"
             "</head><body><div class='card'><h1>Sukaka Discord Bot</h1>"
-            "<p>Bot is running.</p><p>Keepalive endpoint: 127.0.0.1:7861</p></div></body></html>"
+            "<p>Bot is running.</p><p>Keepalive endpoint: 0.0.0.0:7861</p></div></body></html>"
         ).encode("utf-8")
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", "text/html; charset=utf-8")
