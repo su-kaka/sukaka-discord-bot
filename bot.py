@@ -22,7 +22,7 @@ KEEPALIVE_HOST = "0.0.0.0"
 KEEPALIVE_PORT = 7861
 
 MESSAGE_LINK_PATTERN = re.compile(
-    r"^https?://(?:ptb\\.|canary\\.)?discord(?:app)?\\.com/channels/(\\d+)/(\\d+)/(\\d+)$"
+    r"^https?://(?:ptb\.|canary\.)?discord(?:app)?\.com/channels/(\d+)/(\d+)/(\d+)$"
 )
 
 
