@@ -109,12 +109,12 @@ class SukakaBot(discord.Client):
     def register_commands(self) -> None:
         @self.tree.command(
             name="mute_vote",
-            description="Start a mute vote for a member in this channel.",
+            description="发起成员禁言投票",
         )
         @app_commands.describe(
-            target="Member to mute",
-            duration_minutes="Mute duration in minutes (default 30, max 1440)",
-            reason="Reason for the mute",
+            target="要禁言的成员",
+            duration_minutes="禁言时长（分钟，默认 30，最长 1440）",
+            reason="禁言原因（可选）",
         )
         async def mute_vote(
             interaction: discord.Interaction,
@@ -129,14 +129,14 @@ class SukakaBot(discord.Client):
 
             if target.bot:
                 await interaction.response.send_message(
-                    "Bots cannot be muted by vote.",
+                    "不能对机器人发起禁言投票。",
                     ephemeral=True,
                 )
                 return
 
             if interaction.guild is None:
                 await interaction.response.send_message(
-                    "This command can only be used in a server.",
+                    "此命令只能在服务器中使用。",
                     ephemeral=True,
                 )
                 return
@@ -147,13 +147,13 @@ class SukakaBot(discord.Client):
                 existing_state = self.mute_votes.get(existing_vote_id)
                 if existing_state and not existing_state.resolved:
                     await interaction.response.send_message(
-                        "There is already an active mute vote for this member.",
+                        "该成员已有一个进行中的禁言投票。",
                         ephemeral=True,
                     )
                     return
 
             vote_id = str(uuid.uuid4())
-            vote_reason = reason or "Mute vote"
+            vote_reason = reason or "未填写原因"
             state = VoteState(
                 vote_id=vote_id,
                 guild_id=interaction.guild.id,
@@ -179,9 +179,9 @@ class SukakaBot(discord.Client):
 
         @self.tree.command(
             name="delete_message",
-            description="Delete a message by its Discord message link.",
+            description="通过 Discord 消息链接删除消息",
         )
-        @app_commands.describe(message_link="Discord message link")
+        @app_commands.describe(message_link="Discord 消息链接")
         async def delete_message(
             interaction: discord.Interaction,
             message_link: str,
@@ -194,7 +194,7 @@ class SukakaBot(discord.Client):
             parsed = parse_message_link(message_link)
             if parsed is None:
                 await interaction.response.send_message(
-                    "Invalid message link format.",
+                    "消息链接格式无效。请粘贴从 Discord 复制的完整消息链接。",
                     ephemeral=True,
                 )
                 return
@@ -202,7 +202,7 @@ class SukakaBot(discord.Client):
             guild_id, channel_id, message_id = parsed
             if interaction.guild is None or guild_id != interaction.guild.id:
                 await interaction.response.send_message(
-                    "The message link must belong to this server.",
+                    "该消息链接不属于当前服务器。",
                     ephemeral=True,
                 )
                 return
@@ -212,36 +212,36 @@ class SukakaBot(discord.Client):
                 await message.delete()
             except ValueError:
                 await interaction.response.send_message(
-                    "Unsupported channel type in message link.",
+                    "该消息所在的频道类型暂不支持。",
                     ephemeral=True,
                 )
                 return
             except discord.NotFound:
                 await interaction.response.send_message(
-                    "Message or channel not found.",
+                    "未找到目标频道或消息，消息可能已被删除。",
                     ephemeral=True,
                 )
                 return
             except discord.Forbidden:
                 await interaction.response.send_message(
-                    "I do not have permission to delete this message.",
+                    "删除失败：机器人在目标频道缺少“管理消息”权限。",
                     ephemeral=True,
                 )
                 return
             except discord.HTTPException as exc:
                 await interaction.response.send_message(
-                    f"Delete failed: {exc}",
+                    f"删除失败：{exc}",
                     ephemeral=True,
                 )
                 return
 
-            await interaction.response.send_message("Message deleted.", ephemeral=True)
+            await interaction.response.send_message("消息已删除。", ephemeral=True)
 
         @self.tree.command(
             name="mark_message",
-            description="Pin a message by its Discord message link.",
+            description="通过 Discord 消息链接置顶消息",
         )
-        @app_commands.describe(message_link="Discord message link")
+        @app_commands.describe(message_link="Discord 消息链接")
         async def mark_message(
             interaction: discord.Interaction,
             message_link: str,
@@ -254,7 +254,7 @@ class SukakaBot(discord.Client):
             parsed = parse_message_link(message_link)
             if parsed is None:
                 await interaction.response.send_message(
-                    "Invalid message link format.",
+                    "消息链接格式无效。请粘贴从 Discord 复制的完整消息链接。",
                     ephemeral=True,
                 )
                 return
@@ -262,7 +262,7 @@ class SukakaBot(discord.Client):
             guild_id, channel_id, message_id = parsed
             if interaction.guild is None or guild_id != interaction.guild.id:
                 await interaction.response.send_message(
-                    "The message link must belong to this server.",
+                    "该消息链接不属于当前服务器。",
                     ephemeral=True,
                 )
                 return
@@ -271,43 +271,43 @@ class SukakaBot(discord.Client):
                 message = await fetch_message(self, channel_id, message_id)
                 if message.pinned:
                     await interaction.response.send_message(
-                        "Message is already pinned.",
+                        "该消息已经置顶。",
                         ephemeral=True,
                     )
                     return
                 await message.pin(reason=f"Marked by {interaction.user.id} via bot command")
             except ValueError:
                 await interaction.response.send_message(
-                    "Unsupported channel type in message link.",
+                    "该消息所在的频道类型暂不支持。",
                     ephemeral=True,
                 )
                 return
             except discord.NotFound:
                 await interaction.response.send_message(
-                    "Message or channel not found.",
+                    "未找到目标频道或消息，消息可能已被删除。",
                     ephemeral=True,
                 )
                 return
             except discord.Forbidden:
                 await interaction.response.send_message(
-                    "I do not have permission to pin this message.",
+                    "置顶失败：机器人在目标频道缺少“管理消息”权限。",
                     ephemeral=True,
                 )
                 return
             except discord.HTTPException as exc:
                 await interaction.response.send_message(
-                    f"Mark failed: {exc}",
+                    f"置顶失败：{exc}",
                     ephemeral=True,
                 )
                 return
 
-            await interaction.response.send_message("Message pinned.", ephemeral=True)
+            await interaction.response.send_message("消息已置顶。", ephemeral=True)
 
         @self.tree.command(
             name="unmark_message",
-            description="Unpin a message by its Discord message link.",
+            description="通过 Discord 消息链接取消置顶",
         )
-        @app_commands.describe(message_link="Discord message link")
+        @app_commands.describe(message_link="Discord 消息链接")
         async def unmark_message(
             interaction: discord.Interaction,
             message_link: str,
@@ -320,7 +320,7 @@ class SukakaBot(discord.Client):
             parsed = parse_message_link(message_link)
             if parsed is None:
                 await interaction.response.send_message(
-                    "Invalid message link format.",
+                    "消息链接格式无效。请粘贴从 Discord 复制的完整消息链接。",
                     ephemeral=True,
                 )
                 return
@@ -328,7 +328,7 @@ class SukakaBot(discord.Client):
             guild_id, channel_id, message_id = parsed
             if interaction.guild is None or guild_id != interaction.guild.id:
                 await interaction.response.send_message(
-                    "The message link must belong to this server.",
+                    "该消息链接不属于当前服务器。",
                     ephemeral=True,
                 )
                 return
@@ -337,37 +337,37 @@ class SukakaBot(discord.Client):
                 message = await fetch_message(self, channel_id, message_id)
                 if not message.pinned:
                     await interaction.response.send_message(
-                        "Message is not pinned.",
+                        "该消息当前未置顶。",
                         ephemeral=True,
                     )
                     return
                 await message.unpin(reason=f"Unmarked by {interaction.user.id} via bot command")
             except ValueError:
                 await interaction.response.send_message(
-                    "Unsupported channel type in message link.",
+                    "该消息所在的频道类型暂不支持。",
                     ephemeral=True,
                 )
                 return
             except discord.NotFound:
                 await interaction.response.send_message(
-                    "Message or channel not found.",
+                    "未找到目标频道或消息，消息可能已被删除。",
                     ephemeral=True,
                 )
                 return
             except discord.Forbidden:
                 await interaction.response.send_message(
-                    "I do not have permission to unpin this message.",
+                    "取消置顶失败：机器人在目标频道缺少“管理消息”权限。",
                     ephemeral=True,
                 )
                 return
             except discord.HTTPException as exc:
                 await interaction.response.send_message(
-                    f"Unmark failed: {exc}",
+                    f"取消置顶失败：{exc}",
                     ephemeral=True,
                 )
                 return
 
-            await interaction.response.send_message("Message unpinned.", ephemeral=True)
+            await interaction.response.send_message("已取消置顶。", ephemeral=True)
 
     def _is_allowed_channel(self, interaction: discord.Interaction) -> bool:
         return interaction.channel_id == ALLOWED_CHANNEL_ID
@@ -377,24 +377,24 @@ class SukakaBot(discord.Client):
 
     def _deny_reason(self, interaction: discord.Interaction) -> Optional[str]:
         if not self._is_allowed_channel(interaction):
-            return f"This bot can only be used in channel {ALLOWED_CHANNEL_ID}."
+            return f"此机器人只能在 <#{ALLOWED_CHANNEL_ID}> 中使用。"
         if not self._is_whitelisted(interaction.user.id):
-            return "You are not in MUTE_WHITELIST, so you cannot use this bot."
+            return "你没有使用此机器人的权限。"
         return None
 
     def _build_vote_embed(self, state: VoteState, votes: int, resolved: bool) -> discord.Embed:
-        status = "Passed" if resolved else "Voting"
-        embed = discord.Embed(title="Mute Vote", color=discord.Color.red())
-        embed.add_field(name="Status", value=status, inline=True)
-        embed.add_field(name="Votes", value=f"{votes}/{VOTE_THRESHOLD}", inline=True)
-        embed.add_field(name="Target", value=f"<@{state.target_id}>", inline=False)
+        status = "已通过" if resolved else "投票中"
+        embed = discord.Embed(title="禁言投票", color=discord.Color.red())
+        embed.add_field(name="状态", value=status, inline=True)
+        embed.add_field(name="票数", value=f"{votes}/{VOTE_THRESHOLD}", inline=True)
+        embed.add_field(name="目标成员", value=f"<@{state.target_id}>", inline=False)
         embed.add_field(
-            name="Duration",
-            value=f"{state.duration_minutes} minute(s)",
+            name="禁言时长",
+            value=f"{state.duration_minutes} 分钟",
             inline=True,
         )
-        embed.add_field(name="Reason", value=state.reason, inline=False)
-        embed.set_footer(text=f"Initiator: {state.initiator_id}")
+        embed.add_field(name="原因", value=state.reason, inline=False)
+        embed.set_footer(text=f"发起人 ID：{state.initiator_id}")
         return embed
 
 
@@ -405,9 +405,9 @@ class MuteVoteView(discord.ui.View):
         self.vote_id = vote_id
 
     def update_vote_label(self, votes: int) -> None:
-        self.vote_button.label = f"Vote mute ({votes}/{VOTE_THRESHOLD})"
+        self.vote_button.label = f"投票禁言（{votes}/{VOTE_THRESHOLD}）"
 
-    @discord.ui.button(label="Vote mute (0/5)", style=discord.ButtonStyle.danger)
+    @discord.ui.button(label="投票禁言（0/5）", style=discord.ButtonStyle.danger)
     async def vote_button(
         self,
         interaction: discord.Interaction,
@@ -416,28 +416,28 @@ class MuteVoteView(discord.ui.View):
         state = self.bot.mute_votes.get(self.vote_id)
         if state is None:
             await interaction.response.send_message(
-                "This vote no longer exists.",
+                "此投票已不存在，可能因机器人重启而失效。",
                 ephemeral=True,
             )
             return
 
         if state.resolved:
             await interaction.response.send_message(
-                "This vote has already been resolved.",
+                "此投票已经结束。",
                 ephemeral=True,
             )
             return
 
         if interaction.channel_id != state.channel_id:
             await interaction.response.send_message(
-                "You can only vote in the original vote channel.",
+                "只能在发起投票的频道中投票。",
                 ephemeral=True,
             )
             return
 
         if not self.bot._is_whitelisted(interaction.user.id):
             await interaction.response.send_message(
-                "You are not in MUTE_WHITELIST, so you cannot use this bot.",
+                "你没有参与禁言投票的权限。",
                 ephemeral=True,
             )
             return
@@ -445,21 +445,21 @@ class MuteVoteView(discord.ui.View):
         user_id = interaction.user.id
         if interaction.user.bot:
             await interaction.response.send_message(
-                "Bots cannot vote.",
+                "机器人不能参与投票。",
                 ephemeral=True,
             )
             return
 
         if user_id == state.target_id:
             await interaction.response.send_message(
-                "Target member cannot vote in this mute vote.",
+                "被投票成员不能参与自己的禁言投票。",
                 ephemeral=True,
             )
             return
 
         if user_id in state.voter_ids:
             await interaction.response.send_message(
-                "You have already voted.",
+                "你已经投过票了。",
                 ephemeral=True,
             )
             return
@@ -476,7 +476,7 @@ class MuteVoteView(discord.ui.View):
         guild = self.bot.get_guild(state.guild_id)
         if guild is None:
             await interaction.response.send_message(
-                "Guild not found. Cannot apply mute.",
+                "无法找到当前服务器，未执行禁言。",
                 ephemeral=True,
             )
             return
@@ -490,13 +490,13 @@ class MuteVoteView(discord.ui.View):
             await member.timeout(until, reason=f"Vote mute: {state.reason}")
         except discord.Forbidden:
             await interaction.response.send_message(
-                "I do not have permission to timeout this member.",
+                "禁言失败：机器人缺少“禁言成员”权限，或角色层级不足。",
                 ephemeral=True,
             )
             return
         except discord.HTTPException as exc:
             await interaction.response.send_message(
-                f"Failed to apply timeout: {exc}",
+                f"禁言失败：{exc}",
                 ephemeral=True,
             )
             return
@@ -512,7 +512,7 @@ class MuteVoteView(discord.ui.View):
         embed = self.bot._build_vote_embed(state, votes, resolved=True)
         await interaction.response.edit_message(embed=embed, view=self)
         await interaction.followup.send(
-            f"Mute vote passed. <@{state.target_id}> has been timed out for {state.duration_minutes} minute(s)."
+            f"投票已通过，<@{state.target_id}> 已被禁言 {state.duration_minutes} 分钟。"
         )
 
 
