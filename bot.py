@@ -435,13 +435,6 @@ class MuteVoteView(discord.ui.View):
             )
             return
 
-        if not self.bot._is_whitelisted(interaction.user.id):
-            await interaction.response.send_message(
-                "你没有参与禁言投票的权限。",
-                ephemeral=True,
-            )
-            return
-
         user_id = interaction.user.id
         if interaction.user.bot:
             await interaction.response.send_message(
