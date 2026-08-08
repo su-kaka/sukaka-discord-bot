@@ -10,7 +10,8 @@
 - 发起禁言投票：
 	- 选择禁言对象
 	- 选择禁言时长（默认 30 分钟，最长 24 小时）
-	- 达到 5 票后自动执行禁言（Timeout）
+	- 达到 5 票后移除目标成员在当前频道的发言权
+	- 到期后自动恢复目标成员原有的频道权限
 	- 所有成员均可参与投票，不受白名单限制
 - 通过消息链接删除消息
 - 通过消息链接标注消息（使用 Discord 置顶消息 / Pin）
@@ -34,6 +35,7 @@ pip install -r requirements.txt
 
 - DISCORD_TOKEN：Discord Bot Token
 - MUTE_WHITELIST：白名单用户 ID，多个用英文逗号分隔
+- CHANNEL_MUTES_FILE：可选，频道禁言恢复状态文件路径，默认 `channel_mutes.json`
 
 示例：
 
@@ -73,7 +75,9 @@ python bot.py
 
 - 默认禁言时长为 30 分钟
 - 最长禁言时长为 1440 分钟（24 小时）
-- 投票达到 5 票后自动执行禁言
+- 投票达到 5 票后，目标成员仅在发起投票的文字频道中被禁言
+- 到期后恢复目标成员在该频道原有的权限覆盖
+- 机器人重启后会继续处理尚未到期的频道禁言
 - 被投票成员可以参与自己的投票
 - 同一成员同一时间仅允许一个进行中的禁言投票
 
@@ -128,7 +132,7 @@ https://discord.com/channels/<guild_id>/<channel_id>/<message_id>
 - Use Application Commands
 - Read Message History
 - Manage Messages（用于删除消息、置顶消息、取消置顶消息）
-- Moderate Members（用于禁言/Timeout）
+- Manage Roles（用于修改和恢复成员在当前频道的发言权限）
 
 ## 保活页面
 
@@ -147,12 +151,13 @@ https://discord.com/channels/<guild_id>/<channel_id>/<message_id>
 
 - 确认当前用户在 MUTE_WHITELIST 中
 - 确认命令在指定频道 1293095144806940738 内执行
-- 确认机器人角色权限足够（Manage Messages / Moderate Members）
+- 确认机器人角色权限足够（Manage Messages / Manage Roles）
 
 3. 无法禁言
 
-- 机器人角色层级需高于目标成员
-- 机器人需拥有 Moderate Members 权限
+- 确认机器人在当前频道拥有 Manage Roles 权限
+- 服务器所有者和拥有 Administrator 权限的成员会绕过频道权限覆盖，无法被频道禁言
+- 检查 `CHANNEL_MUTES_FILE` 所在目录是否可写，以便到期后恢复原权限
 
 ## 项目文件
 

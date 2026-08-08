@@ -1,10 +1,13 @@
+import asyncio
+import json
 import os
 import re
+import time
 import uuid
-from dataclasses import dataclass, field
-from datetime import timedelta
+from dataclasses import asdict, dataclass, field
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from threading import Thread
 from typing import Optional
 
@@ -20,6 +23,8 @@ MAX_TIMEOUT_MINUTES = 24 * 60
 VOTE_THRESHOLD = 5
 KEEPALIVE_HOST = "0.0.0.0"
 KEEPALIVE_PORT = 7861
+CHANNEL_MUTES_FILE = Path(os.getenv("CHANNEL_MUTES_FILE", "channel_mutes.json"))
+CHANNEL_MUTE_PERMISSIONS = ("send_messages",)
 
 MESSAGE_LINK_PATTERN = re.compile(
     r"^https?://(?:ptb\.|canary\.)?discord(?:app)?\.com/channels/(\d+)/(\d+)/(\d+)$"
@@ -82,7 +87,26 @@ class VoteState:
     initiator_id: int
     reason: str
     voter_ids: set[int] = field(default_factory=set)
+    resolving: bool = False
     resolved: bool = False
+
+
+@dataclass
+class ChannelMuteRecord:
+    guild_id: int
+    channel_id: int
+    target_id: int
+    restore_at: float
+    original_allow: int
+    original_deny: int
+
+    @property
+    def key(self) -> tuple[int, int, int]:
+        return self.guild_id, self.channel_id, self.target_id
+
+
+class ChannelMuteError(Exception):
+    pass
 
 
 class SukakaBot(discord.Client):
@@ -95,7 +119,12 @@ class SukakaBot(discord.Client):
         self.tree = app_commands.CommandTree(self)
         self.mute_votes: dict[str, VoteState] = {}
         self.active_vote_by_target: dict[tuple[int, int], str] = {}
+        self.channel_mutes: dict[tuple[int, int, int], ChannelMuteRecord] = {}
+        self.channel_mute_tasks: dict[tuple[int, int, int], asyncio.Task[None]] = {}
+        self.channel_mute_lock = asyncio.Lock()
         self._synced = False
+        self._channel_mutes_started = False
+        self._load_channel_mutes()
 
     async def setup_hook(self) -> None:
         self.register_commands()
@@ -104,17 +133,21 @@ class SukakaBot(discord.Client):
         if not self._synced:
             await self.tree.sync()
             self._synced = True
+        if not self._channel_mutes_started:
+            self._channel_mutes_started = True
+            for record in self.channel_mutes.values():
+                self._schedule_channel_mute_restore(record)
         print(f"Logged in as {self.user} ({self.user.id})")
 
     def register_commands(self) -> None:
         @self.tree.command(
             name="mute_vote",
-            description="发起成员禁言投票",
+            description="发起成员频道禁言投票",
         )
         @app_commands.describe(
-            target="要禁言的成员",
-            duration_minutes="禁言时长（分钟，默认 30，最长 1440）",
-            reason="禁言原因（可选）",
+            target="要在当前频道禁言的成员",
+            duration_minutes="频道禁言时长（分钟，默认 30，最长 1440）",
+            reason="频道禁言原因（可选）",
         )
         async def mute_vote(
             interaction: discord.Interaction,
@@ -139,6 +172,23 @@ class SukakaBot(discord.Client):
                     "此命令只能在服务器中使用。",
                     ephemeral=True,
                 )
+                return
+
+            channel = interaction.channel
+            if not isinstance(channel, discord.TextChannel):
+                await interaction.response.send_message(
+                    "频道禁言投票只能在服务器文字频道中发起。",
+                    ephemeral=True,
+                )
+                return
+
+            denied_message = self._channel_mute_denial_reason(
+                interaction.guild,
+                channel,
+                target,
+            )
+            if denied_message:
+                await interaction.response.send_message(denied_message, ephemeral=True)
                 return
 
             active_key = (interaction.guild.id, target.id)
@@ -382,9 +432,200 @@ class SukakaBot(discord.Client):
             return "你没有使用此机器人的权限。"
         return None
 
+    def _channel_mute_denial_reason(
+        self,
+        guild: discord.Guild,
+        channel: discord.TextChannel,
+        target: discord.Member,
+    ) -> Optional[str]:
+        if target.id == guild.owner_id:
+            return "不能对服务器所有者发起频道禁言投票。"
+        if target.guild_permissions.administrator:
+            return "不能对拥有“管理员”权限的成员发起频道禁言投票。"
+
+        bot_member = guild.me
+        if bot_member is None and self.user is not None:
+            bot_member = guild.get_member(self.user.id)
+        if bot_member is None:
+            return "无法确认机器人在当前服务器中的权限。"
+        if not channel.permissions_for(bot_member).manage_roles:
+            return "机器人在当前频道缺少“管理身份组”权限，无法管理频道发言权。"
+        return None
+
+    def _load_channel_mutes(self) -> None:
+        if not CHANNEL_MUTES_FILE.exists():
+            return
+        try:
+            raw_records = json.loads(CHANNEL_MUTES_FILE.read_text(encoding="utf-8"))
+            for raw_record in raw_records:
+                record = ChannelMuteRecord(**raw_record)
+                self.channel_mutes[record.key] = record
+        except (OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
+            print(f"Failed to load channel mute state: {exc}")
+
+    def _save_channel_mutes(self) -> None:
+        temporary_file = CHANNEL_MUTES_FILE.with_name(f"{CHANNEL_MUTES_FILE.name}.tmp")
+        payload = [asdict(record) for record in self.channel_mutes.values()]
+        temporary_file.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        os.replace(temporary_file, CHANNEL_MUTES_FILE)
+
+    def _schedule_channel_mute_restore(self, record: ChannelMuteRecord) -> None:
+        existing_task = self.channel_mute_tasks.pop(record.key, None)
+        if existing_task is not None:
+            existing_task.cancel()
+
+        task = asyncio.create_task(
+            self._restore_channel_mute_when_due(record.key),
+            name=f"channel-mute-restore-{record.channel_id}-{record.target_id}",
+        )
+        self.channel_mute_tasks[record.key] = task
+        task.add_done_callback(
+            lambda completed, key=record.key: self._discard_channel_mute_task(
+                key,
+                completed,
+            )
+        )
+
+    def _discard_channel_mute_task(
+        self,
+        key: tuple[int, int, int],
+        completed_task: asyncio.Task[None],
+    ) -> None:
+        if self.channel_mute_tasks.get(key) is completed_task:
+            self.channel_mute_tasks.pop(key, None)
+
+    async def apply_channel_mute(
+        self,
+        guild: discord.Guild,
+        channel: discord.TextChannel,
+        member: discord.Member,
+        duration_minutes: int,
+        reason: str,
+    ) -> None:
+        denied_message = self._channel_mute_denial_reason(guild, channel, member)
+        if denied_message:
+            raise ChannelMuteError(denied_message)
+
+        key = guild.id, channel.id, member.id
+        async with self.channel_mute_lock:
+            previous_record = self.channel_mutes.get(key)
+            if previous_record is None:
+                original_overwrite = channel.overwrites_for(member)
+                original_allow, original_deny = original_overwrite.pair()
+                record = ChannelMuteRecord(
+                    guild_id=guild.id,
+                    channel_id=channel.id,
+                    target_id=member.id,
+                    restore_at=time.time() + duration_minutes * 60,
+                    original_allow=original_allow.value,
+                    original_deny=original_deny.value,
+                )
+            else:
+                record = ChannelMuteRecord(
+                    **{
+                        **asdict(previous_record),
+                        "restore_at": time.time() + duration_minutes * 60,
+                    }
+                )
+
+            self.channel_mutes[key] = record
+            self._save_channel_mutes()
+
+            muted_overwrite = channel.overwrites_for(member)
+            for permission_name in CHANNEL_MUTE_PERMISSIONS:
+                setattr(muted_overwrite, permission_name, False)
+
+            try:
+                await channel.set_permissions(
+                    member,
+                    overwrite=muted_overwrite,
+                    reason=reason,
+                )
+            except Exception:
+                if previous_record is None:
+                    self.channel_mutes.pop(key, None)
+                else:
+                    self.channel_mutes[key] = previous_record
+                self._save_channel_mutes()
+                raise
+
+            self._schedule_channel_mute_restore(record)
+
+    async def _restore_channel_mute_when_due(
+        self,
+        key: tuple[int, int, int],
+    ) -> None:
+        while True:
+            record = self.channel_mutes.get(key)
+            if record is None:
+                return
+
+            delay = record.restore_at - time.time()
+            if delay > 0:
+                await asyncio.sleep(delay)
+                continue
+
+            async with self.channel_mute_lock:
+                record = self.channel_mutes.get(key)
+                if record is None:
+                    return
+                if record.restore_at > time.time():
+                    continue
+
+                try:
+                    guild = self.get_guild(record.guild_id)
+                    if guild is None:
+                        raise ChannelMuteError("无法找到服务器")
+
+                    channel = guild.get_channel(record.channel_id)
+                    if channel is None:
+                        fetched_channel = await self.fetch_channel(record.channel_id)
+                        channel = fetched_channel
+                    if not isinstance(channel, discord.TextChannel):
+                        raise ChannelMuteError("无法找到文字频道")
+
+                    member = guild.get_member(record.target_id)
+                    if member is None:
+                        member = await guild.fetch_member(record.target_id)
+
+                    original_overwrite = discord.PermissionOverwrite.from_pair(
+                        discord.Permissions(record.original_allow),
+                        discord.Permissions(record.original_deny),
+                    )
+                    restored_overwrite = channel.overwrites_for(member)
+                    for permission_name in CHANNEL_MUTE_PERMISSIONS:
+                        setattr(
+                            restored_overwrite,
+                            permission_name,
+                            getattr(original_overwrite, permission_name),
+                        )
+                    if restored_overwrite.is_empty():
+                        restored_overwrite = None
+
+                    await channel.set_permissions(
+                        member,
+                        overwrite=restored_overwrite,
+                        reason="Channel vote mute expired",
+                    )
+                except discord.NotFound:
+                    self.channel_mutes.pop(key, None)
+                    self._save_channel_mutes()
+                    return
+                except (ChannelMuteError, discord.Forbidden, discord.HTTPException) as exc:
+                    print(f"Failed to restore channel mute {key}: {exc}")
+                else:
+                    self.channel_mutes.pop(key, None)
+                    self._save_channel_mutes()
+                    return
+
+            await asyncio.sleep(60)
+
     def _build_vote_embed(self, state: VoteState, votes: int, resolved: bool) -> discord.Embed:
         status = "已通过" if resolved else "投票中"
-        embed = discord.Embed(title="禁言投票", color=discord.Color.red())
+        embed = discord.Embed(title="频道禁言投票", color=discord.Color.red())
         embed.add_field(name="状态", value=status, inline=True)
         embed.add_field(name="票数", value=f"{votes}/{VOTE_THRESHOLD}", inline=True)
         embed.add_field(name="目标成员", value=f"<@{state.target_id}>", inline=False)
@@ -428,6 +669,13 @@ class MuteVoteView(discord.ui.View):
             )
             return
 
+        if state.resolving:
+            await interaction.response.send_message(
+                "投票已达到门槛，正在执行频道禁言。",
+                ephemeral=True,
+            )
+            return
+
         if interaction.channel_id != state.channel_id:
             await interaction.response.send_message(
                 "只能在发起投票的频道中投票。",
@@ -459,8 +707,11 @@ class MuteVoteView(discord.ui.View):
             await interaction.response.edit_message(embed=embed, view=self)
             return
 
+        state.resolving = True
         guild = self.bot.get_guild(state.guild_id)
         if guild is None:
+            state.resolving = False
+            state.voter_ids.discard(user_id)
             await interaction.response.send_message(
                 "无法找到当前服务器，未执行禁言。",
                 ephemeral=True,
@@ -468,26 +719,51 @@ class MuteVoteView(discord.ui.View):
             return
 
         try:
+            channel = guild.get_channel(state.channel_id)
+            if channel is None:
+                channel = await self.bot.fetch_channel(state.channel_id)
+            if not isinstance(channel, discord.TextChannel):
+                raise ChannelMuteError("无法找到发起投票的文字频道。")
+
             member = guild.get_member(state.target_id)
             if member is None:
                 member = await guild.fetch_member(state.target_id)
 
-            until = discord.utils.utcnow() + timedelta(minutes=state.duration_minutes)
-            await member.timeout(until, reason=f"Vote mute: {state.reason}")
-        except discord.Forbidden:
+            await self.bot.apply_channel_mute(
+                guild,
+                channel,
+                member,
+                state.duration_minutes,
+                reason=f"Vote channel mute: {state.reason}",
+            )
+        except ChannelMuteError as exc:
+            state.resolving = False
+            state.voter_ids.discard(user_id)
             await interaction.response.send_message(
-                "禁言失败：机器人缺少“禁言成员”权限，或角色层级不足。",
+                f"频道禁言失败：{exc}",
+                ephemeral=True,
+            )
+            return
+        except discord.Forbidden:
+            state.resolving = False
+            state.voter_ids.discard(user_id)
+            await interaction.response.send_message(
+                "频道禁言失败：机器人缺少“管理身份组”权限，"
+                "或无法修改当前频道的成员权限。",
                 ephemeral=True,
             )
             return
         except discord.HTTPException as exc:
+            state.resolving = False
+            state.voter_ids.discard(user_id)
             await interaction.response.send_message(
-                f"禁言失败：{exc}",
+                f"频道禁言失败：{exc}",
                 ephemeral=True,
             )
             return
 
         state.resolved = True
+        state.resolving = False
         self.bot.active_vote_by_target.pop((state.guild_id, state.target_id), None)
 
         self.update_vote_label(votes)
@@ -498,7 +774,8 @@ class MuteVoteView(discord.ui.View):
         embed = self.bot._build_vote_embed(state, votes, resolved=True)
         await interaction.response.edit_message(embed=embed, view=self)
         await interaction.followup.send(
-            f"投票已通过，<@{state.target_id}> 已被禁言 {state.duration_minutes} 分钟。"
+            f"投票已通过，<@{state.target_id}> 已在本频道禁言 "
+            f"{state.duration_minutes} 分钟。"
         )
 
 
