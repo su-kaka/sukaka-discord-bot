@@ -450,13 +450,6 @@ class MuteVoteView(discord.ui.View):
             )
             return
 
-        if user_id == state.target_id:
-            await interaction.response.send_message(
-                "被投票成员不能参与自己的禁言投票。",
-                ephemeral=True,
-            )
-            return
-
         if user_id in state.voter_ids:
             await interaction.response.send_message(
                 "你已经投过票了。",
