@@ -394,7 +394,11 @@ class SukakaBot(discord.Client):
             inline=True,
         )
         embed.add_field(name="原因", value=state.reason, inline=False)
-        embed.set_footer(text=f"发起人 ID：{state.initiator_id}")
+        embed.add_field(
+            name="发起人",
+            value=f"<@{state.initiator_id}>",
+            inline=False,
+        )
         return embed
 
 
