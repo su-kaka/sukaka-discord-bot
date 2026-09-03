@@ -1,4 +1,12 @@
-build连接点击进去404page的 切无痕模式
-build经常断连 可以使用画中画
-build页面 手机浏览器卡住不能点的 切到桌面模式
-GCLI凭证是403 You do not have a valid license of this product. 报错的。搞个pro或者找个家庭组
+Build 使用
+遇到连接和页面问题：
+- 点击 Build 连接后进入 404 页面：切换到无痕模式。
+- Build 经常断连：可以尝试使用画中画模式。
+- 手机浏览器打开 Build 页面后卡住、无法点击：切换到桌面模式。
+遇到生成问题：
+- Build 截断严重：尝试使用「build-抗截断」模型。
+- Build 无报错但秒空回：可能是被外审拦截，尝试更换卡或预设。
+
+GCLI 凭证报错：
+- 如果出现 `403 You do not have a valid license of this product.`，请开通 Pro，或寻找可用的家庭组。
+- 如果 GCLI 报错消息中包含 `Verify your account to continue.`，点击快验按钮，然后点击显示的链接完成验证即可。验证失败可以尝试这个方法：https://discord.com/channels/1134557553011998840/1543395896409071736
