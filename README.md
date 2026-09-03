@@ -16,6 +16,7 @@
 - 通过消息链接删除消息
 - 通过消息链接标注消息（使用 Discord 置顶消息 / Pin）
 - 通过消息链接取消标注消息（取消置顶 / Unpin）
+- 每隔一段时间从 `carousel.txt` 向指定频道循环发送消息（默认 5 分钟）
 - 监听 0.0.0.0:7861，提供静态网页用于保活
 
 ## 运行环境
@@ -36,6 +37,8 @@ pip install -r requirements.txt
 - DISCORD_TOKEN：Discord Bot Token
 - MUTE_WHITELIST：白名单用户 ID，多个用英文逗号分隔
 - CHANNEL_MUTES_FILE：可选，频道禁言恢复状态文件路径，默认 `channel_mutes.json`
+- CAROUSEL_FILE：可选，循环消息文件路径，默认 `carousel.txt`
+- CAROUSEL_INTERVAL_MINUTES：可选，循环发送间隔（分钟），默认 `5`
 
 示例：
 
@@ -48,6 +51,7 @@ MUTE_WHITELIST=123456789012345678,234567890123456789
 
 - 如果 MUTE_WHITELIST 为空，则没有用户可以发起投票或执行管理指令；所有成员仍可参与已有投票。
 - 机器人仅在固定频道 1293095144806940738 接收与处理指令。
+- 机器人会向频道 `1455038454772531311` 循环发送 `carousel.txt` 的内容；文件为空时跳过本轮发送。
 
 ## 启动
 
@@ -129,6 +133,7 @@ https://discord.com/channels/<guild_id>/<channel_id>/<message_id>
 
 - View Channels
 - Send Messages
+- Send Messages（目标频道 `1455038454772531311`，用于循环发送消息）
 - Use Application Commands
 - Read Message History
 - Manage Messages（用于删除消息、置顶消息、取消置顶消息）

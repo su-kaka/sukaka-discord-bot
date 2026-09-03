@@ -18,6 +18,9 @@ from dotenv import load_dotenv
 load_dotenv()
 
 ALLOWED_CHANNEL_ID = 1293095144806940738
+CAROUSEL_CHANNEL_ID = 1455038454772531311
+CAROUSEL_FILE = Path(os.getenv("CAROUSEL_FILE", "carousel.txt"))
+DEFAULT_CAROUSEL_INTERVAL_MINUTES = 5
 DEFAULT_TIMEOUT_MINUTES = 30
 MAX_TIMEOUT_MINUTES = 24 * 60
 VOTE_THRESHOLD = 5
@@ -124,6 +127,8 @@ class SukakaBot(discord.Client):
         self.channel_mute_lock = asyncio.Lock()
         self._synced = False
         self._channel_mutes_started = False
+        self._carousel_started = False
+        self._carousel_task: Optional[asyncio.Task[None]] = None
         self._load_channel_mutes()
 
     async def setup_hook(self) -> None:
@@ -137,7 +142,55 @@ class SukakaBot(discord.Client):
             self._channel_mutes_started = True
             for record in self.channel_mutes.values():
                 self._schedule_channel_mute_restore(record)
+        if not self._carousel_started:
+            self._carousel_started = True
+            self._carousel_task = asyncio.create_task(
+                self._carousel_loop(),
+                name="carousel-message-loop",
+            )
         print(f"Logged in as {self.user} ({self.user.id})")
+
+    async def _carousel_loop(self) -> None:
+        interval_minutes = self._carousel_interval_minutes()
+        while True:
+            try:
+                content = CAROUSEL_FILE.read_text(encoding="utf-8").strip()
+                if content:
+                    channel = self.get_channel(CAROUSEL_CHANNEL_ID)
+                    if channel is None:
+                        channel = await self.fetch_channel(CAROUSEL_CHANNEL_ID)
+                    if not isinstance(channel, (discord.TextChannel, discord.Thread)):
+                        raise ValueError("目标频道不是文字频道或帖子")
+                    await channel.send(content)
+                    print(f"Carousel message sent to channel {CAROUSEL_CHANNEL_ID}")
+            except FileNotFoundError:
+                print(f"Carousel file not found: {CAROUSEL_FILE}")
+            except (OSError, ValueError, discord.NotFound, discord.Forbidden, discord.HTTPException) as exc:
+                print(f"Failed to send carousel message: {exc}")
+
+            await asyncio.sleep(interval_minutes * 60)
+
+    @staticmethod
+    def _carousel_interval_minutes() -> float:
+        raw_interval = os.getenv(
+            "CAROUSEL_INTERVAL_MINUTES",
+            str(DEFAULT_CAROUSEL_INTERVAL_MINUTES),
+        )
+        try:
+            interval_minutes = float(raw_interval)
+        except ValueError:
+            print(
+                f"Invalid CAROUSEL_INTERVAL_MINUTES={raw_interval!r}; "
+                f"using {DEFAULT_CAROUSEL_INTERVAL_MINUTES} minutes."
+            )
+            return DEFAULT_CAROUSEL_INTERVAL_MINUTES
+        if interval_minutes <= 0:
+            print(
+                f"CAROUSEL_INTERVAL_MINUTES must be positive; "
+                f"using {DEFAULT_CAROUSEL_INTERVAL_MINUTES} minutes."
+            )
+            return DEFAULT_CAROUSEL_INTERVAL_MINUTES
+        return interval_minutes
 
     def register_commands(self) -> None:
         @self.tree.command(
