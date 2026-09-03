@@ -1,1 +1,3 @@
-1.Build连接点击进去404page的 切无痕模式
+build连接点击进去404page的 切无痕模式
+build经常断连 可以使用画中画
+GCLI凭证是403 You do not have a valid license of this product. 报错的。搞个pro或者找个家庭组
