@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import random
+import time
 from typing import TYPE_CHECKING, Optional
 
 import discord
@@ -21,6 +22,7 @@ PLAYER_COUNT = 6
 BET_AMOUNT = 5
 JOIN_TIMEOUT_SECONDS = 120
 API_TIMEOUT_SECONDS = 15
+COOLDOWN_SECONDS = 10
 
 TRIGGER_KEYWORD = "赌大小"
 
@@ -199,6 +201,7 @@ def start_roulette(bot: "SukakaBot") -> None:
     """注册统一的消息入口：赌大小触发 + 发言掉落。"""
     client = httpx.AsyncClient(timeout=API_TIMEOUT_SECONDS)
     active_game: dict[str, Optional[DiceGame]] = {"game": None}
+    last_trigger_time: dict[str, float] = {"time": 0.0}
 
     @bot.event
     async def on_message(message: discord.Message) -> None:
@@ -212,6 +215,13 @@ def start_roulette(bot: "SukakaBot") -> None:
             if game and not game.finished:
                 await message.channel.send("🎲 已有一局正在报名中，等结束后再开新局。")
                 return
+            now = time.monotonic()
+            elapsed = now - last_trigger_time["time"]
+            if elapsed < COOLDOWN_SECONDS:
+                remaining = int(COOLDOWN_SECONDS - elapsed) + 1
+                await message.channel.send(f"🎲 命令冷却中，请等待 {remaining} 秒后再试。")
+                return
+            last_trigger_time["time"] = now
             game = DiceGame(bot, message.channel, client)
             active_game["game"] = game
             await game.open_lobby()
