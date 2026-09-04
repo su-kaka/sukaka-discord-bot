@@ -11,3 +11,7 @@ Build 使用
 GCLI 凭证报错：
 - 如果出现 `403 You do not have a valid license of this product.`，请开通 Pro，或寻找可用的家庭组。
 - 如果 GCLI 报错消息中包含 `Verify your account to continue.`，点击快验按钮，然后点击显示的链接完成验证即可。验证失败可以尝试这个方法：https://discord.com/channels/1134557553011998840/1543395896409071736
+
+未上传凭证的可以通过发言随机掉落额度：
+- 在本帖发言即可随机掉落 0-5 点活动额度，掉落会有提醒。额度北京时间0点清空，每天不结余
+- 活动额度可用于使用国产模型，例如 kimi-k3、glm5.2、glm5.3、deepseek-4-flash-0731。

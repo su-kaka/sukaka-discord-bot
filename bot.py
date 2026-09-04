@@ -17,7 +17,7 @@ from channel_admin import (
     register_commands,
     schedule_channel_mute_restore,
 )
-from message_reader import start_message_reader
+from quota_drop import start_quota_drop
 
 load_dotenv()
 
@@ -72,7 +72,7 @@ class SukakaBot(discord.Client):
         self._channel_mutes_started = False
         self._carousel_started = False
         self._carousel_task: Optional[asyncio.Task[None]] = None
-        self._message_reader_started = False
+        self._quota_drop_started = False
         load_channel_mutes(self)
 
     async def setup_hook(self) -> None:
@@ -89,9 +89,9 @@ class SukakaBot(discord.Client):
         if not self._carousel_started:
             self._carousel_started = True
             self._carousel_task = start_carousel(self)
-        if not self._message_reader_started:
-            self._message_reader_started = True
-            start_message_reader(self)
+        if not self._quota_drop_started:
+            self._quota_drop_started = True
+            start_quota_drop(self)
         print(f"Logged in as {self.user} ({self.user.id})")
 
 
