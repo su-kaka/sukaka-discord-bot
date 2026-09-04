@@ -20,6 +20,7 @@ DEFAULT_API_BASE = "https://catiecli.sukaka.top"
 
 PLAYER_COUNT = 6
 BET_AMOUNT = 5
+FEE_AMOUNT = 5
 JOIN_TIMEOUT_SECONDS = 120
 API_TIMEOUT_SECONDS = 15
 COOLDOWN_SECONDS = 10
@@ -103,7 +104,8 @@ class DiceGame:
         return (
             f"🎲 **赌大小**（{len(self.players)}/{PLAYER_COUNT}）\n"
             f"规则：每人随机 roll 1-100 点，点数最大者通吃奖池。\n"
-            f"入场费：{BET_AMOUNT} 点活动额度，奖池 {PLAYER_COUNT * BET_AMOUNT} 点。\n"
+            f"入场费：{BET_AMOUNT} 点活动额度，奖池 {PLAYER_COUNT * BET_AMOUNT} 点"
+            f"（其中 {FEE_AMOUNT} 点作为手续费销毁）。\n"
             f"已加入：{names}\n"
             f"满 {PLAYER_COUNT} 人自动开奖，{JOIN_TIMEOUT_SECONDS} 秒未满自动取消。"
         )
@@ -198,14 +200,16 @@ class DiceGame:
 
         winner = winners[0]
         pot = BET_AMOUNT * len(self.players)
-        new_quota = await _adjust_quota(self.client, "grant", winner.name, pot)
+        prize = pot - FEE_AMOUNT  # 销毁 FEE_AMOUNT 点作为手续费
+        new_quota = await _adjust_quota(self.client, "grant", winner.name, prize)
         if new_quota is None:
             await self.channel.send(
-                f"🏆 {winner.mention} 获胜！但奖池发放失败，请联系管理员手动补发 {pot} 点。"
+                f"🏆 {winner.mention} 获胜！但奖池发放失败，请联系管理员手动补发 {prize} 点。"
             )
         else:
             await self.channel.send(
-                f"🏆 {winner.mention} 点数最大，通吃奖池 **{pot} 点**！当前额度 {new_quota} 点。"
+                f"🏆 {winner.mention} 点数最大，通吃奖池 **{prize} 点**"
+                f"（奖池 {pot} 点，手续费 {FEE_AMOUNT} 点已销毁）！当前额度 {new_quota} 点。"
             )
         self.finished = True
 
