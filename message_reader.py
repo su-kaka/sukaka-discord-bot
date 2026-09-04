@@ -38,9 +38,22 @@ async def test_read_messages(bot: "SukakaBot") -> None:
             print(f"[MessageReader] 错误：获取频道失败 - {e}")
             return
 
-    if not isinstance(channel, discord.TextChannel):
-        print(f"[MessageReader] 错误：频道 {channel_id} 不是文字频道")
+    if not isinstance(channel, (discord.TextChannel, discord.Thread)):
+        print(f"[MessageReader] 错误：频道 {channel_id} 不是文字频道或帖子（实际类型：{type(channel).__name__}）")
         return
+
+    if isinstance(channel, discord.Thread):
+        if channel.archived:
+            print(f"[MessageReader] 警告：帖子 {channel_id} 已归档，可能无法读取消息")
+        # 私有帖子需要 bot 先加入才能读取消息
+        if not channel.me:
+            try:
+                await channel.join()
+                print(f"[MessageReader] 已加入帖子 #{channel.name}")
+            except discord.Forbidden:
+                print(f"[MessageReader] 警告：无法加入帖子 {channel_id}（可能是私有帖子且未被邀请）")
+            except discord.HTTPException as e:
+                print(f"[MessageReader] 警告：加入帖子失败 - {e}")
 
     print(f"[MessageReader] 开始读取频道 #{channel.name} ({channel_id}) 的最近 {limit} 条消息...")
 
@@ -49,6 +62,8 @@ async def test_read_messages(bot: "SukakaBot") -> None:
     except discord.Forbidden:
         print(f"[MessageReader] 错误：没有权限读取频道 {channel_id} 的消息历史")
         print("[MessageReader] 请确认 bot 拥有该频道的 View Channel 和 Read Message History 权限")
+        if isinstance(channel, discord.Thread):
+            print("[MessageReader] 提示：对于帖子，bot 可能还需要先加入该帖子（await channel.join()）")
         return
     except discord.HTTPException as e:
         print(f"[MessageReader] 错误：读取消息历史失败 - {e}")
