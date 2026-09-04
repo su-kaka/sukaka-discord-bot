@@ -127,13 +127,26 @@ class DiceGame:
             )
             return
 
-        self.players.append(user)
-        await interaction.response.send_message(f"已加入！（{len(self.players)}/{PLAYER_COUNT}）", ephemeral=True)
+        # 查询额度期间可能已有其他交互抢先开局/取消，必须重新检查
+        if self.started or self.finished:
+            await interaction.response.send_message("这一局已经开始了。", ephemeral=True)
+            return
+        if any(p.id == user.id for p in self.players):
+            await interaction.response.send_message("你已经加入了。", ephemeral=True)
+            return
 
-        if len(self.players) >= PLAYER_COUNT:
+        # 原子决策：append → 判断是否满员 → 标记 started，中间不插入 await，
+        # 保证单事件循环下只有一个交互能触发开局
+        self.players.append(user)
+        should_start = len(self.players) >= PLAYER_COUNT
+        if should_start:
             self.started = True
             if self.join_view:
                 self.join_view.stop()
+
+        await interaction.response.send_message(f"已加入！（{len(self.players)}/{PLAYER_COUNT}）", ephemeral=True)
+
+        if should_start:
             await self._run_game()
         elif self.message:
             await self.message.edit(content=self._lobby_text(), view=self.join_view)
