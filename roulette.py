@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 import random
 import time
@@ -61,6 +62,17 @@ MARRY_COOLDOWN_SECONDS = 300
 CURSE_KEYWORD = "诅咒"
 CURSE_COST = 10  # 诅咒费用，全销毁
 CURSE_COOLDOWN_SECONDS = 300
+
+ALLIN_KEYWORD = "梭哈"
+ALLIN_MIN_QUOTA = 10  # 额度 ≥ 10 点才能梭哈
+ALLIN_FEE = 2  # 手续费，全销毁
+ALLIN_COOLDOWN_SECONDS = 60
+
+BIG_RED_PACKET_INTERVAL_SECONDS = 360  # 机器人每 6 分钟发一次大红包
+BIG_RED_PACKET_POOL = 200  # 奖池 200 点
+BIG_RED_PACKET_MAX_GRABBERS = 10  # 最多 10 人参与
+BIG_RED_PACKET_MAX_SHARE = 100  # 单人最多抢到 100 点
+BIG_RED_PACKET_TIMEOUT_SECONDS = 300  # 5 分钟未满员也开奖
 
 
 async def _query_quota(client: httpx.AsyncClient, username: str) -> Optional[int]:
@@ -451,6 +463,130 @@ def _split_random(pool: int, count: int) -> list[int]:
     return parts
 
 
+def _split_random_capped(pool: int, count: int, cap: int) -> list[int]:
+    """把 pool 点随机分成 count 份，每份 0-cap 点，总和不超过 pool。"""
+    if count <= 0 or pool <= 0:
+        return []
+    amounts = [random.randint(0, cap) for _ in range(count)]
+    total = sum(amounts)
+    if total > pool:
+        amounts = [a * pool // total for a in amounts]
+    return amounts
+
+
+class BigRedPacketView(discord.ui.View):
+    """机器人大红包：200 点奖池，最多 10 人抢，每人随机 0-100 点。"""
+
+    def __init__(self, client: httpx.AsyncClient) -> None:
+        super().__init__(timeout=BIG_RED_PACKET_TIMEOUT_SECONDS)
+        self.client = client
+        self.message: Optional[discord.Message] = None
+        self.completed = False
+        self.grabbers: list[discord.Member | discord.User] = []
+
+    def _packet_text(self) -> str:
+        names = "、".join(u.mention for u in self.grabbers) or "暂无"
+        return (
+            f"🧧🧧 **机器人大红包**！奖池 **{BIG_RED_PACKET_POOL} 点**，"
+            f"最多 {BIG_RED_PACKET_MAX_GRABBERS} 人参与（{len(self.grabbers)}/{BIG_RED_PACKET_MAX_GRABBERS}）\n"
+            f"每人随机抢 0-{BIG_RED_PACKET_MAX_SHARE} 点，手快有手慢无！\n"
+            f"已参与：{names}\n"
+            f"满 {BIG_RED_PACKET_MAX_GRABBERS} 人立即开奖，"
+            f"{BIG_RED_PACKET_TIMEOUT_SECONDS} 秒未满按参与人数开奖。"
+        )
+
+    @discord.ui.button(label="抢红包", style=discord.ButtonStyle.danger, emoji="🧧")
+    async def grab_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        user = interaction.user
+        if user.bot:
+            await interaction.response.send_message("机器人不能抢红包。", ephemeral=True)
+            return
+        if self.completed:
+            await interaction.response.send_message("红包已开奖。", ephemeral=True)
+            return
+        if any(u.id == user.id for u in self.grabbers):
+            await interaction.response.send_message("你已经参与了。", ephemeral=True)
+            return
+
+        # 原子加入：append 与满员判断之间不插入 await
+        self.grabbers.append(user)
+        is_full = len(self.grabbers) >= BIG_RED_PACKET_MAX_GRABBERS
+        if is_full:
+            self.completed = True
+
+        await interaction.response.send_message(
+            f"🧧 已参与大红包（{len(self.grabbers)}/{BIG_RED_PACKET_MAX_GRABBERS}），等待开奖！",
+            ephemeral=True,
+        )
+
+        if is_full:
+            await self._settle()
+        elif self.message:
+            await self.message.edit(content=self._packet_text(), view=self)
+
+    async def _settle(self) -> None:
+        """开奖：参与者每人随机 0-100 点，总和不超过奖池。"""
+        self.completed = True
+        self.stop()
+        for item in self.children:
+            item.disabled = True  # type: ignore[union-attr]
+
+        shares = _split_random_capped(
+            BIG_RED_PACKET_POOL, len(self.grabbers), BIG_RED_PACKET_MAX_SHARE
+        )
+
+        results: list[tuple[discord.Member | discord.User, int, Optional[int]]] = []
+        for user, amount in zip(self.grabbers, shares):
+            if amount > 0:
+                new_quota = await _adjust_quota(self.client, "grant", user.name, amount)
+            else:
+                new_quota = None
+            results.append((user, amount, new_quota))
+
+        total_granted = sum(amount for _, amount, _ in results)
+        lines = [
+            f"🧧🧧 **机器人大红包开奖！**（{len(self.grabbers)} 人参与，"
+            f"共发出 {total_granted}/{BIG_RED_PACKET_POOL} 点）"
+        ]
+        for user, amount, new_quota in sorted(results, key=lambda r: r[1], reverse=True):
+            if amount == 0:
+                lines.append(f"💨 {user.mention} 手气不佳，抢到 0 点")
+            elif new_quota is None:
+                lines.append(f"🧧 {user.mention} 抢到 **{amount} 点**（发放失败，请联系管理员）")
+            else:
+                lines.append(f"🧧 {user.mention} 抢到 **{amount} 点**（当前 {new_quota} 点）")
+
+        if self.message:
+            await self.message.edit(content="\n".join(lines), view=None)
+
+    async def on_timeout(self) -> None:
+        if self.completed:
+            return
+        if not self.grabbers:
+            if self.message:
+                await self.message.edit(content="🧧🧧 大红包无人参与，已过期。", view=None)
+            return
+        await self._settle()
+
+
+async def _big_red_packet_loop(bot: "SukakaBot", client: httpx.AsyncClient) -> None:
+    """每 6 分钟向频道发送一次机器人大红包。"""
+    while True:
+        await asyncio.sleep(BIG_RED_PACKET_INTERVAL_SECONDS)
+        try:
+            channel = bot.get_channel(QUOTA_CHANNEL_ID)
+            if channel is None:
+                channel = await bot.fetch_channel(QUOTA_CHANNEL_ID)
+            if not isinstance(channel, (discord.TextChannel, discord.Thread)):
+                print(f"[BigRedPacket] 频道 {QUOTA_CHANNEL_ID} 不是文字频道或帖子，跳过本轮")
+                continue
+            view = BigRedPacketView(client)
+            view.message = await channel.send(view._packet_text(), view=view)
+            print(f"[BigRedPacket] 已在频道 {QUOTA_CHANNEL_ID} 发送大红包")
+        except (discord.NotFound, discord.Forbidden, discord.HTTPException) as exc:
+            print(f"[BigRedPacket] 发送大红包失败: {exc}")
+
+
 class RedPacketView(discord.ui.View):
     """红包视图：发送者押 10 点，8 点随机分给抢红包的人（2 点销毁）。"""
 
@@ -718,7 +854,13 @@ def start_roulette(bot: "SukakaBot") -> None:
     rob_cooldowns: dict[int, float] = {}
     marry_cooldowns: dict[int, float] = {}
     curse_cooldowns: dict[int, float] = {}
+    allin_cooldowns: dict[int, float] = {}
     cursed_users: set[int] = set()  # 被诅咒的用户 ID
+
+    asyncio.create_task(
+        _big_red_packet_loop(bot, client),
+        name="big-red-packet-loop",
+    )
 
     @bot.event
     async def on_message(message: discord.Message) -> None:
@@ -931,6 +1073,56 @@ def start_roulette(bot: "SukakaBot") -> None:
                 )
             return
 
+        # 梭哈：全部额度押上，扣 2 点手续费后 50% 翻倍或清零
+        if content == ALLIN_KEYWORD:
+            now = time.monotonic()
+            cooldown_until = allin_cooldowns.get(message.author.id, 0.0)
+            if now < cooldown_until:
+                remaining = int(cooldown_until - now) + 1
+                await message.channel.send(f"🎰 梭哈冷却中，请等待 {remaining} 秒后再试。")
+                return
+
+            quota = await _query_quota(client, message.author.name)
+            if quota is None:
+                await message.channel.send("🎰 查询额度失败，请稍后再试。")
+                return
+            if quota < ALLIN_MIN_QUOTA:
+                await message.channel.send(
+                    f"🎰 额度不足：当前 {quota} 点，梭哈需要至少 {ALLIN_MIN_QUOTA} 点。"
+                )
+                return
+
+            allin_cooldowns[message.author.id] = now + ALLIN_COOLDOWN_SECONDS
+
+            # 先清零全部额度
+            deducted = await _adjust_quota(client, "deduct", message.author.name, quota)
+            if deducted is None:
+                await message.channel.send("🎰 扣除额度失败，请稍后再试。")
+                return
+
+            stake = quota - ALLIN_FEE  # 扣手续费后的赌注
+            if random.random() < 0.5:
+                # 翻倍：返还 stake * 2
+                prize = stake * 2
+                new_quota = await _adjust_quota(client, "grant", message.author.name, prize)
+                if new_quota is None:
+                    await message.channel.send(
+                        f"🎰 {message.author.mention} 梭哈 **{quota} 点** 翻倍成功！"
+                        f"但奖金发放失败，请联系管理员手动补发 {prize} 点。"
+                    )
+                    return
+                await message.channel.send(
+                    f"🎰🎉 {message.author.mention} 梭哈 **{quota} 点**（手续费 {ALLIN_FEE} 点销毁）\n"
+                    f"🃏 翻倍成功！赢得 **{prize} 点**，当前额度 {new_quota} 点！"
+                )
+            else:
+                # 清零：全部销毁
+                await message.channel.send(
+                    f"🎰💥 {message.author.mention} 梭哈 **{quota} 点**（手续费 {ALLIN_FEE} 点销毁）\n"
+                    f"🃏 运气不佳，全部清零！当前额度 0 点。"
+                )
+            return
+
         # 红包
         if content == RED_PACKET_KEYWORD:
             now = time.monotonic()
@@ -1008,3 +1200,7 @@ def start_roulette(bot: "SukakaBot") -> None:
         await handle_drop_message(client, message)
 
     print(f"[DiceGame] 已启动，在频道 {QUOTA_CHANNEL_ID} 发送「{TRIGGER_KEYWORD}」开局（{PLAYER_COUNT} 人局）")
+    print(
+        f"[BigRedPacket] 已启动，每 {BIG_RED_PACKET_INTERVAL_SECONDS // 60} 分钟"
+        f"在频道 {QUOTA_CHANNEL_ID} 发送 {BIG_RED_PACKET_POOL} 点大红包"
+    )
