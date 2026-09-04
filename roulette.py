@@ -68,6 +68,13 @@ ALLIN_MIN_QUOTA = 10  # 额度 ≥ 10 点才能梭哈
 ALLIN_FEE = 2  # 手续费，全销毁
 ALLIN_COOLDOWN_SECONDS = 60
 
+TRAP_KEYWORD = "陷阱"
+TRAP_COST = 20  # 设置陷阱消耗 20 点，全销毁
+TRAP_COUNT = 4  # 一次设置 4 个陷阱
+TRAP_MIN_AMOUNT = 0  # 触发陷阱最少扣 0 点
+TRAP_MAX_AMOUNT = 10  # 触发陷阱最多扣 10 点
+TRAP_COOLDOWN_SECONDS = 300
+
 BIG_RED_PACKET_INTERVAL_SECONDS = 360  # 机器人每 6 分钟发一次大红包
 BIG_RED_PACKET_POOL = 200  # 奖池 200 点
 BIG_RED_PACKET_MAX_GRABBERS = 10  # 最多 10 人参与
@@ -855,6 +862,8 @@ def start_roulette(bot: "SukakaBot") -> None:
     marry_cooldowns: dict[int, float] = {}
     curse_cooldowns: dict[int, float] = {}
     allin_cooldowns: dict[int, float] = {}
+    trap_cooldowns: dict[int, float] = {}
+    active_traps: dict[int, list[int]] = {}  # 设置者 ID -> 剩余陷阱触发次数列表
     cursed_users: set[int] = set()  # 被诅咒的用户 ID
 
     asyncio.create_task(
@@ -1073,6 +1082,44 @@ def start_roulette(bot: "SukakaBot") -> None:
                 )
             return
 
+        # 陷阱：消耗 20 点设置 4 个陷阱，他人发言触发后随机扣 1-10 点给设置者
+        if content == TRAP_KEYWORD:
+            now = time.monotonic()
+            cooldown_until = trap_cooldowns.get(message.author.id, 0.0)
+            if now < cooldown_until:
+                remaining = int(cooldown_until - now) + 1
+                await message.channel.send(f"🪤 陷阱冷却中，请等待 {remaining} 秒后再试。")
+                return
+            if message.author.id in active_traps and active_traps[message.author.id]:
+                remaining_traps = len(active_traps[message.author.id])
+                await message.channel.send(
+                    f"🪤 你还有 {remaining_traps} 个陷阱未触发，等全部触发后再设置。"
+                )
+                return
+
+            quota = await _query_quota(client, message.author.name)
+            if quota is None:
+                await message.channel.send("🪤 查询额度失败，请稍后再试。")
+                return
+            if quota < TRAP_COST:
+                await message.channel.send(
+                    f"🪤 额度不足：当前 {quota} 点，设置陷阱需要 {TRAP_COST} 点。"
+                )
+                return
+
+            result = await _adjust_quota(client, "deduct", message.author.name, TRAP_COST)
+            if result is None:
+                await message.channel.send("🪤 扣除额度失败，请稍后再试。")
+                return
+
+            trap_cooldowns[message.author.id] = now + TRAP_COOLDOWN_SECONDS
+            active_traps[message.author.id] = [0] * TRAP_COUNT  # 用列表长度记录剩余陷阱数
+            await message.channel.send(
+                f"🪤 {message.author.mention} 消耗 {TRAP_COST} 点设置了 {TRAP_COUNT} 个陷阱！\n"
+                f"其他人在此频道发言将随机触发陷阱，被扣 {TRAP_MIN_AMOUNT}-{TRAP_MAX_AMOUNT} 点转给设置者。"
+            )
+            return
+
         # 梭哈：全部额度押上，扣 2 点手续费后 50% 翻倍或清零
         if content == ALLIN_KEYWORD:
             now = time.monotonic()
@@ -1196,6 +1243,39 @@ def start_roulette(bot: "SukakaBot") -> None:
             active_game["game"] = game
             await game.open_lobby()
             return
+
+        # 触发陷阱：发言者随机踩中他人设置的陷阱
+        if active_traps:
+            setter_ids = [uid for uid, traps in active_traps.items() if traps and uid != message.author.id]
+            if setter_ids:
+                setter_id = random.choice(setter_ids)
+                traps = active_traps[setter_id]
+                if traps:
+                    traps.pop()  # 消耗一个陷阱
+                    if not traps:
+                        del active_traps[setter_id]
+                    amount = random.randint(TRAP_MIN_AMOUNT, TRAP_MAX_AMOUNT)
+                    victim_quota = await _query_quota(client, message.author.name)
+                    if victim_quota is not None and victim_quota > 0:
+                        stolen = min(amount, victim_quota)
+                        deducted = await _adjust_quota(client, "deduct", message.author.name, stolen)
+                        if deducted is not None:
+                            setter = bot.get_user(setter_id)
+                            setter_name = setter.name if setter else None
+                            granted: Optional[int] = None
+                            if setter_name:
+                                granted = await _adjust_quota(client, "grant", setter_name, stolen)
+                            if granted is None and setter_name:
+                                # 发放失败则退回受害者
+                                await _adjust_quota(client, "grant", message.author.name, stolen)
+                            else:
+                                setter_mention = f"<@{setter_id}>"
+                                await message.channel.send(
+                                    f"🪤 {message.author.mention} 踩中了 {setter_mention} 的陷阱！\n"
+                                    f"被扣除 **{stolen} 点**（当前 {deducted} 点），"
+                                    f"{setter_mention} 获得 {stolen} 点。"
+                                )
+                                return
 
         await handle_drop_message(client, message)
 
