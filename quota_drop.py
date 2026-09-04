@@ -23,8 +23,8 @@ DROP_MIN = 0
 DROP_MAX = 10
 # 掉落 0 点的概率（0-1），默认 30%；剩余概率由 1-10 点均匀平分
 DROP_ZERO_CHANCE = float(os.getenv("QUOTA_DROP_ZERO_CHANCE", "0.3"))
-# 触发扣减事件的概率（0-1），默认 10%
-DEDUCT_CHANCE = float(os.getenv("QUOTA_DEDUCT_CHANCE", "0.1"))
+# 触发扣减事件的概率（0-1），默认 20%
+DEDUCT_CHANCE = float(os.getenv("QUOTA_DEDUCT_CHANCE", "0.2"))
 DEDUCT_MIN = 1
 DEDUCT_MAX = 10
 COOLDOWN_MIN_SECONDS = int(os.getenv("QUOTA_DROP_COOLDOWN_MIN", "30"))
