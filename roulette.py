@@ -75,6 +75,9 @@ TRAP_MIN_AMOUNT = 1  # 触发陷阱最少扣 1 点
 TRAP_MAX_AMOUNT = 10  # 触发陷阱最多扣 10 点
 TRAP_COOLDOWN_SECONDS = 300
 
+LEADERBOARD_KEYWORD = "排行榜"
+LEADERBOARD_TOP_N = 10
+
 BIG_RED_PACKET_INTERVAL_SECONDS = 360  # 机器人每 6 分钟发一次大红包
 BIG_RED_PACKET_POOL = 200  # 奖池 200 点
 BIG_RED_PACKET_MAX_GRABBERS = 10  # 最多 10 人参与
@@ -120,6 +123,26 @@ async def _adjust_quota(
             return int(data.get("current_activity_quota", 0))
         return None
     except (httpx.HTTPError, ValueError):
+        return None
+
+
+async def _query_top_quota(client: httpx.AsyncClient) -> Optional[list[tuple[str, int]]]:
+    """查询活动额度前十用户，返回 (username, quota) 列表。"""
+    api_key = os.getenv("ACTIVITY_QUOTA_API_KEY")
+    if not api_key:
+        return None
+    api_base = os.getenv("ACTIVITY_QUOTA_API_BASE", DEFAULT_API_BASE)
+    try:
+        response = await client.get(
+            f"{api_base}/api/activity-quota/top",
+            headers={"X-Activity-Quota-Key": api_key},
+        )
+        data = response.json()
+        if response.is_success and data.get("success") is True:
+            users = data.get("users", [])
+            return [(u["username"], int(u["activity_quota"])) for u in users]
+        return None
+    except (httpx.HTTPError, ValueError, KeyError):
         return None
 
 
@@ -1080,6 +1103,22 @@ def start_roulette(bot: "SukakaBot") -> None:
                     f"🛡️ {message.author.mention} 抢劫 {target.mention} 被反杀！\n"
                     f"被扣除 **{loss} 点**（已销毁），当前额度 {new_quota} 点。"
                 )
+            return
+
+        # 排行榜：展示活动额度前十用户
+        if content == LEADERBOARD_KEYWORD:
+            top_users = await _query_top_quota(client)
+            if top_users is None:
+                await message.channel.send("🏆 查询排行榜失败，请稍后再试。")
+                return
+            if not top_users:
+                await message.channel.send("🏆 暂无排行数据。")
+                return
+            lines = ["🏆 **活动额度排行榜**"]
+            for rank, (username, quota) in enumerate(top_users[:LEADERBOARD_TOP_N], 1):
+                medal = {1: "🥇", 2: "🥈", 3: "🥉"}.get(rank, f"{rank}.")
+                lines.append(f"{medal} {username} — **{quota} 点**")
+            await message.channel.send("\n".join(lines))
             return
 
         # 陷阱：消耗 20 点设置 4 个陷阱，他人发言触发后随机扣 1-10 点给设置者

@@ -199,7 +199,37 @@ X-Activity-Quota-Key: 你的活动额度专用密钥
 用户 testuser 当前活动额度为 250 点。
 ```
 
-## 7. 错误响应
+## 7. 查询活动额度前十用户
+
+该接口使用专用密钥鉴权，返回活动额度数量前十的用户用户名及对应额度。
+
+### 请求
+
+```http
+GET /api/activity-quota/top
+X-Activity-Quota-Key: 你的活动额度专用密钥
+```
+
+### 成功响应
+
+```json
+{
+  "success": true,
+  "users": [
+    {"username": "user1", "activity_quota": 500},
+    {"username": "user2", "activity_quota": 320},
+    {"username": "user3", "activity_quota": 100}
+  ]
+}
+```
+
+机器人可以播报：
+
+```text
+当前活动额度前十：user1（500 点）、user2（320 点）、user3（100 点）。
+```
+
+## 8. 错误响应
 
 ### 专用密钥错误
 
@@ -239,7 +269,7 @@ HTTP `422`。常见原因：
 - 同时提供了 `user_id` 和 `username`
 - `amount` 不是正整数
 
-## 8. Python 机器人示例
+## 9. Python 机器人示例
 
 ```python
 import requests
@@ -308,6 +338,26 @@ def deduct_activity_quota(username: str, amount: int) -> str:
         )
 
     return f"扣减失败：{data.get('detail', '未知错误')}"
+
+
+def get_top_activity_quota_users() -> str:
+    response = requests.get(
+        f"{BASE_URL}/api/activity-quota/top",
+        headers={
+            "X-Activity-Quota-Key": ACTIVITY_QUOTA_KEY,
+        },
+        timeout=15,
+    )
+    data = response.json()
+
+    if response.ok and data.get("success") is True:
+        users = data.get("users", [])
+        if not users:
+            return "当前暂无活动额度用户。"
+        entries = [f"{u['username']}（{u['activity_quota']} 点）" for u in users]
+        return f"当前活动额度前十：{'、'.join(entries)}。"
+
+    return f"查询失败：{data.get('detail', '未知错误')}"
 ```
 
 机器人处理建议：
