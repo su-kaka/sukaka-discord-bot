@@ -135,7 +135,9 @@ class BegView(discord.ui.View):
         self.stop()
         self._finish()
         await interaction.response.send_message(
-            f"🪙 感谢施舍！你已扣除 {BEG_COST} 点，当前额度 {giver_quota} 点。", ephemeral=True
+            f"🪙 {giver.mention} 施舍了 {self.beggar.mention}！"
+            f"你扣除 {BEG_COST} 点（当前 {giver_quota} 点），"
+            f"对方获得 {BEG_RECEIVE} 点（当前 {beggar_quota} 点）。"
         )
         if self.message:
             await self.message.edit(
