@@ -21,10 +21,19 @@ DB_PATH = Path(os.getenv("QUOTA_DROP_DB", "quota_drops.db"))
 
 DROP_MIN = 0
 DROP_MAX = 10
-COOLDOWN_MIN_SECONDS = 60
-COOLDOWN_MAX_SECONDS = 600
+# 掉落 0 点的权重，其余点数平分权重 1；例如 10 表示 0 点概率约为 10/(10+10) = 50%
+DROP_ZERO_WEIGHT = int(os.getenv("QUOTA_DROP_ZERO_WEIGHT", "10"))
+COOLDOWN_MIN_SECONDS = int(os.getenv("QUOTA_DROP_COOLDOWN_MIN", "30"))
+COOLDOWN_MAX_SECONDS = int(os.getenv("QUOTA_DROP_COOLDOWN_MAX", "180"))
 NOTIFY_DELETE_AFTER = 10
 API_TIMEOUT_SECONDS = 15
+
+
+def _roll_drop_amount() -> int:
+    """加权随机掉落点数：0 点权重为 DROP_ZERO_WEIGHT，1-10 点各为 1。"""
+    population = [0] + list(range(1, DROP_MAX + 1))
+    weights = [DROP_ZERO_WEIGHT] + [1] * DROP_MAX
+    return random.choices(population, weights=weights, k=1)[0]
 
 
 def _init_db() -> None:
@@ -100,7 +109,7 @@ def start_quota_drop(bot: "SukakaBot") -> None:
         discord_id = str(message.author.id)
         username = message.author.name
 
-        amount = random.randint(DROP_MIN, DROP_MAX)
+        amount = _roll_drop_amount()
         cooldown_seconds = random.uniform(COOLDOWN_MIN_SECONDS, COOLDOWN_MAX_SECONDS)
         cooldown_until = time.time() + cooldown_seconds
 
@@ -110,6 +119,13 @@ def start_quota_drop(bot: "SukakaBot") -> None:
 
         if amount == 0:
             print(f"[QuotaDrop] {username} 掉落 0 点，冷却 {cooldown_seconds:.0f} 秒")
+            try:
+                await message.channel.send(
+                    f"💨 {message.author.mention} 很遗憾，这次没有掉落额度，下次好运！",
+                    delete_after=NOTIFY_DELETE_AFTER,
+                )
+            except (discord.Forbidden, discord.HTTPException) as exc:
+                print(f"[QuotaDrop] 提醒发送失败：{exc}")
             return
 
         current_quota = await _grant_quota(client, username, amount)
