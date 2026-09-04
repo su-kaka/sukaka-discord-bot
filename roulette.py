@@ -41,7 +41,8 @@ DUEL_COOLDOWN_SECONDS = 30
 RED_PACKET_KEYWORD = "红包"
 RED_PACKET_COST = 10
 RED_PACKET_MAX_GRABBERS = 8
-RED_PACKET_POOL = 8  # 10 - 2 销毁，随机分给抢红包的人
+RED_PACKET_MAX_WINNERS = 3  # 最多 3 人中奖，其余抢 0 点
+RED_PACKET_POOL = 8  # 10 - 2 销毁，随机分给中奖者
 RED_PACKET_TIMEOUT_SECONDS = 60
 RED_PACKET_COOLDOWN_SECONDS = 30
 
@@ -331,7 +332,8 @@ class RedPacketView(discord.ui.View):
         names = "、".join(u.mention for u in self.grabbers) or "暂无"
         return (
             f"🧧 {self.sender.mention} 发了一个红包！（{len(self.grabbers)}/{RED_PACKET_MAX_GRABBERS}）\n"
-            f"{RED_PACKET_POOL} 点随机分给抢红包的人（红包 {RED_PACKET_COST} 点，2 点销毁），手快有手慢无！\n"
+            f"{RED_PACKET_POOL} 点随机分给最多 {RED_PACKET_MAX_WINNERS} 个幸运儿"
+            f"（红包 {RED_PACKET_COST} 点，2 点销毁），其余人抢 0 点！\n"
             f"已参与：{names}\n"
             f"满 {RED_PACKET_MAX_GRABBERS} 人立即开奖，{RED_PACKET_TIMEOUT_SECONDS} 秒未满按参与人数开奖。"
         )
@@ -368,20 +370,31 @@ class RedPacketView(discord.ui.View):
             await self.message.edit(content=self._packet_text(), view=self)
 
     async def _settle(self) -> None:
-        """开奖：把奖池随机分给参与者。"""
+        """开奖：随机选出最多 3 个幸运儿分奖池，其余人 0 点。"""
         self._finish()
-        shares = _split_random(RED_PACKET_POOL, len(self.grabbers))
+        winner_count = min(RED_PACKET_MAX_WINNERS, len(self.grabbers))
+        winners = random.sample(self.grabbers, winner_count)
+        shares = _split_random(RED_PACKET_POOL, winner_count)
+
         results: list[tuple[discord.Member | discord.User, int, Optional[int]]] = []
-        for user, amount in zip(self.grabbers, shares):
+        for user, amount in zip(winners, shares):
             new_quota = await _adjust_quota(self.client, "grant", user.name, amount)
             results.append((user, amount, new_quota))
+        for user in self.grabbers:
+            if user not in winners:
+                results.append((user, 0, None))
 
-        lines = [f"🧧 {self.sender.mention} 的红包开奖！（{len(self.grabbers)} 人参与，奖池 {RED_PACKET_POOL} 点）"]
+        lines = [
+            f"🧧 {self.sender.mention} 的红包开奖！"
+            f"（{len(self.grabbers)} 人参与，{winner_count} 人中奖，奖池 {RED_PACKET_POOL} 点）"
+        ]
         for user, amount, new_quota in sorted(results, key=lambda r: r[1], reverse=True):
-            if new_quota is None:
-                lines.append(f"{user.mention} 抢到 **{amount} 点**（发放失败，请联系管理员）")
+            if amount == 0:
+                lines.append(f"💨 {user.mention} 手气不佳，抢到 0 点")
+            elif new_quota is None:
+                lines.append(f"🧧 {user.mention} 抢到 **{amount} 点**（发放失败，请联系管理员）")
             else:
-                lines.append(f"{user.mention} 抢到 **{amount} 点**（当前 {new_quota} 点）")
+                lines.append(f"🧧 {user.mention} 抢到 **{amount} 点**（当前 {new_quota} 点）")
 
         if self.message:
             await self.message.edit(content="\n".join(lines), view=None)
