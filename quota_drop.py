@@ -21,8 +21,8 @@ DB_PATH = Path(os.getenv("QUOTA_DROP_DB", "quota_drops.db"))
 
 DROP_MIN = 0
 DROP_MAX = 10
-# 掉落 0 点的概率（0-1），默认 20%；剩余概率由 1-10 点均匀平分
-DROP_ZERO_CHANCE = float(os.getenv("QUOTA_DROP_ZERO_CHANCE", "0.2"))
+# 掉落 0 点的概率（0-1），默认 40%；剩余概率由 1-10 点均匀平分
+DROP_ZERO_CHANCE = float(os.getenv("QUOTA_DROP_ZERO_CHANCE", "0.4"))
 # 触发扣减事件的概率（0-1），默认 10%
 DEDUCT_CHANCE = float(os.getenv("QUOTA_DEDUCT_CHANCE", "0.1"))
 DEDUCT_MIN = 1
