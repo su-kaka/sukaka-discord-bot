@@ -69,7 +69,7 @@ ALLIN_FEE = 2  # 手续费，全销毁
 ALLIN_COOLDOWN_SECONDS = 60
 
 TRAP_KEYWORD = "陷阱"
-TRAP_COST = 20  # 设置陷阱消耗 20 点，全销毁
+TRAP_COST = 10  # 设置陷阱消耗 10 点，全销毁
 TRAP_COUNT = 4  # 一次设置 4 个陷阱
 TRAP_MIN_AMOUNT = 1  # 触发陷阱最少扣 1 点
 TRAP_MAX_AMOUNT = 10  # 触发陷阱最多扣 10 点
