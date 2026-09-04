@@ -6,6 +6,7 @@
 
 - 查询当前登录用户的活动额度
 - 给指定用户增加活动额度
+- 给指定用户减少活动额度
 
 活动额度每天北京时间 00:00 自动清零。活动模型会优先消耗活动额度，余额不足时再消耗普通额度。
 
@@ -21,6 +22,12 @@ https://catiecli.sukaka.top
 
 ```env
 ACTIVITY_QUOTA_API_KEY=请替换为随机生成的长密钥
+```
+
+可以使用以下命令生成密钥：
+
+```bash
+python -c "import secrets; print(secrets.token_urlsafe(32))"
 ```
 
 修改 `.env` 后重启后端服务使配置生效。
@@ -87,7 +94,48 @@ HTTP 状态码为 `200` 时表示发放成功：
 
 其中 `activity_quota` 是兼容旧调用方保留的字段，新的机器人优先使用 `current_activity_quota`。
 
-## 4. 查询当前用户额度
+## 4. 给用户减少额度
+
+### 请求
+
+```http
+POST /api/activity-quota/deduct
+Content-Type: application/json
+X-Activity-Quota-Key: 你的活动额度专用密钥
+```
+
+请求体格式与增加额度相同，可以使用 `user_id` 或 `username`：
+
+```json
+{
+  "username": "testuser",
+  "amount": 50
+}
+```
+
+当用户当前额度不足时，接口会将额度扣减到 `0`，不会出现负数；接口仍返回成功，并在 `current_activity_quota` 中返回扣减后的余额。
+
+### 成功响应
+
+```json
+{
+  "success": true,
+  "message": "活动额度减少成功",
+  "user_id": 123,
+  "username": "testuser",
+  "deducted": 50,
+  "current_activity_quota": 200,
+  "activity_quota": 200
+}
+```
+
+机器人可以播报：
+
+```text
+活动额度减少成功，用户 testuser 减少 50 点，当前额度 200 点。
+```
+
+## 5. 查询当前用户额度
 
 该接口使用网页登录 JWT，不使用发放专用密钥。
 
@@ -106,7 +154,7 @@ Authorization: Bearer 用户登录 Token
 }
 ```
 
-## 5. 错误响应
+## 6. 错误响应
 
 ### 专用密钥错误
 
@@ -146,7 +194,7 @@ HTTP `422`。常见原因：
 - 同时提供了 `user_id` 和 `username`
 - `amount` 不是正整数
 
-## 6. Python 机器人示例
+## 7. Python 机器人示例
 
 ```python
 import requests
@@ -175,4 +223,33 @@ def grant_activity_quota(username: str, amount: int) -> str:
         )
 
     return f"发放失败：{data.get('detail', '未知错误')}"
+
+
+def deduct_activity_quota(username: str, amount: int) -> str:
+    response = requests.post(
+        f"{BASE_URL}/api/activity-quota/deduct",
+        headers={
+            "Content-Type": "application/json",
+            "X-Activity-Quota-Key": ACTIVITY_QUOTA_KEY,
+        },
+        json={"username": username, "amount": amount},
+        timeout=15,
+    )
+    data = response.json()
+
+    if response.ok and data.get("success") is True:
+        return (
+            f"{data['message']}，用户 {data['username']} "
+            f"减少 {data['deducted']} 点，"
+            f"当前额度 {data['current_activity_quota']} 点。"
+        )
+
+    return f"扣减失败：{data.get('detail', '未知错误')}"
 ```
+
+机器人处理建议：
+
+- 先检查 HTTP 状态码和响应中的 `success` 是否为 `true`。
+- 成功时播报 `message`、目标用户、操作数量和 `current_activity_quota`。
+- 扣减数量大于当前余额时，仍视为成功，当前额度返回 `0`。
+- 失败时播报响应中的 `detail`，不要把专用密钥或完整请求头输出到聊天记录。

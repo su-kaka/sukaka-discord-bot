@@ -21,8 +21,12 @@ DB_PATH = Path(os.getenv("QUOTA_DROP_DB", "quota_drops.db"))
 
 DROP_MIN = 0
 DROP_MAX = 10
-# 掉落 0 点的权重，其余点数平分权重 1；例如 10 表示 0 点概率约为 10/(10+10) = 50%
-DROP_ZERO_WEIGHT = int(os.getenv("QUOTA_DROP_ZERO_WEIGHT", "10"))
+# 掉落 0 点的概率（0-1），默认 50%；剩余概率由 1-10 点均匀平分
+DROP_ZERO_CHANCE = float(os.getenv("QUOTA_DROP_ZERO_CHANCE", "0.5"))
+# 触发扣减事件的概率（0-1），默认 10%
+DEDUCT_CHANCE = float(os.getenv("QUOTA_DEDUCT_CHANCE", "0.1"))
+DEDUCT_MIN = 1
+DEDUCT_MAX = 10
 COOLDOWN_MIN_SECONDS = int(os.getenv("QUOTA_DROP_COOLDOWN_MIN", "30"))
 COOLDOWN_MAX_SECONDS = int(os.getenv("QUOTA_DROP_COOLDOWN_MAX", "180"))
 NOTIFY_DELETE_AFTER = 10
@@ -30,10 +34,10 @@ API_TIMEOUT_SECONDS = 15
 
 
 def _roll_drop_amount() -> int:
-    """加权随机掉落点数：0 点权重为 DROP_ZERO_WEIGHT，1-10 点各为 1。"""
-    population = [0] + list(range(1, DROP_MAX + 1))
-    weights = [DROP_ZERO_WEIGHT] + [1] * DROP_MAX
-    return random.choices(population, weights=weights, k=1)[0]
+    """随机掉落点数：DROP_ZERO_CHANCE 概率为 0，否则 1-10 均匀随机。"""
+    if random.random() < DROP_ZERO_CHANCE:
+        return 0
+    return random.randint(1, DROP_MAX)
 
 
 def _init_db() -> None:
@@ -66,8 +70,10 @@ def _try_set_cooldown(discord_id: str, cooldown_until: float) -> bool:
         return cursor.rowcount > 0
 
 
-async def _grant_quota(client: httpx.AsyncClient, username: str, amount: int) -> Optional[int]:
-    """调用活动额度 API，成功返回当前额度，失败返回 None。"""
+async def _call_quota_api(
+    client: httpx.AsyncClient, endpoint: str, username: str, amount: int
+) -> Optional[int]:
+    """调用活动额度 API（grant/deduct），成功返回当前额度，失败返回 None。"""
     api_key = os.getenv("ACTIVITY_QUOTA_API_KEY")
     if not api_key:
         print("[QuotaDrop] 错误：未配置 ACTIVITY_QUOTA_API_KEY")
@@ -76,7 +82,7 @@ async def _grant_quota(client: httpx.AsyncClient, username: str, amount: int) ->
     api_base = os.getenv("ACTIVITY_QUOTA_API_BASE", DEFAULT_API_BASE)
     try:
         response = await client.post(
-            f"{api_base}/api/activity-quota/grant",
+            f"{api_base}/api/activity-quota/{endpoint}",
             headers={
                 "Content-Type": "application/json",
                 "X-Activity-Quota-Key": api_key,
@@ -87,10 +93,10 @@ async def _grant_quota(client: httpx.AsyncClient, username: str, amount: int) ->
         if response.is_success and data.get("success") is True:
             return int(data.get("current_activity_quota", 0))
         detail = data.get("detail", "未知错误") if isinstance(data, dict) else str(data)
-        print(f"[QuotaDrop] 发放失败（HTTP {response.status_code}）：{detail}")
+        print(f"[QuotaDrop] {endpoint} 失败（HTTP {response.status_code}）：{detail}")
         return None
     except (httpx.HTTPError, ValueError) as exc:
-        print(f"[QuotaDrop] 发放请求异常：{exc}")
+        print(f"[QuotaDrop] {endpoint} 请求异常：{exc}")
         return None
 
 
@@ -113,8 +119,24 @@ def start_quota_drop(bot: "SukakaBot") -> None:
         cooldown_seconds = random.uniform(COOLDOWN_MIN_SECONDS, COOLDOWN_MAX_SECONDS)
         cooldown_until = time.time() + cooldown_seconds
 
-        # 原子检查+写入冷却；无论掉落几点都进冷却
+        # 原子检查+写入冷却；无论结果如何都进冷却
         if not _try_set_cooldown(discord_id, cooldown_until):
+            return
+
+        # 10% 概率触发扣减事件
+        if random.random() < DEDUCT_CHANCE:
+            deduct_amount = random.randint(DEDUCT_MIN, DEDUCT_MAX)
+            current_quota = await _call_quota_api(client, "deduct", username, deduct_amount)
+            if current_quota is None:
+                return
+            print(f"[QuotaDrop] {username} 被扣减 {deduct_amount} 点，当前额度 {current_quota}，冷却 {cooldown_seconds:.0f} 秒")
+            try:
+                await message.channel.send(
+                    f"💸 {message.author.mention} 运气不佳，被扣减 {deduct_amount} 点活动额度，当前额度 {current_quota} 点……",
+                    delete_after=NOTIFY_DELETE_AFTER,
+                )
+            except (discord.Forbidden, discord.HTTPException) as exc:
+                print(f"[QuotaDrop] 提醒发送失败：{exc}")
             return
 
         if amount == 0:
@@ -128,7 +150,7 @@ def start_quota_drop(bot: "SukakaBot") -> None:
                 print(f"[QuotaDrop] 提醒发送失败：{exc}")
             return
 
-        current_quota = await _grant_quota(client, username, amount)
+        current_quota = await _call_quota_api(client, "grant", username, amount)
         if current_quota is None:
             return
 
