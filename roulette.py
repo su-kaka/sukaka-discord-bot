@@ -46,6 +46,13 @@ RED_PACKET_POOL = 8  # 10 - 2 销毁，随机分给中奖者
 RED_PACKET_TIMEOUT_SECONDS = 60
 RED_PACKET_COOLDOWN_SECONDS = 30
 
+ROB_KEYWORD = "抢劫"
+ROB_MIN_AMOUNT = 1
+ROB_MAX_AMOUNT = 5
+ROB_MIN_QUOTA = 5  # 低于此额度无抢劫能力
+ROB_FEE = 1  # 每次额度交换销毁 1 点
+ROB_COOLDOWN_SECONDS = 60
+
 
 async def _query_quota(client: httpx.AsyncClient, username: str) -> Optional[int]:
     api_key = os.getenv("ACTIVITY_QUOTA_API_KEY")
@@ -356,7 +363,6 @@ class RedPacketView(discord.ui.View):
         is_full = len(self.grabbers) >= RED_PACKET_MAX_GRABBERS
         if is_full:
             self.completed = True
-            self.stop()
 
         await interaction.response.send_message(
             f"🧧 已参与 {self.sender.mention} 的红包（{len(self.grabbers)}/{RED_PACKET_MAX_GRABBERS}），"
@@ -371,7 +377,10 @@ class RedPacketView(discord.ui.View):
 
     async def _settle(self) -> None:
         """开奖：随机选出最多 3 个幸运儿分奖池，其余人 0 点。"""
+        self.completed = True
         self._finish()
+        for item in self.children:
+            item.disabled = True  # type: ignore[union-attr]
         winner_count = min(RED_PACKET_MAX_WINNERS, len(self.grabbers))
         winners = random.sample(self.grabbers, winner_count)
         shares = _split_random(RED_PACKET_POOL, winner_count)
@@ -569,6 +578,7 @@ def start_roulette(bot: "SukakaBot") -> None:
     beg_cooldowns: dict[int, float] = {}
     duel_cooldowns: dict[int, float] = {}
     red_packet_cooldowns: dict[int, float] = {}
+    rob_cooldowns: dict[int, float] = {}
 
     @bot.event
     async def on_message(message: discord.Message) -> None:
@@ -608,6 +618,86 @@ def start_roulette(bot: "SukakaBot") -> None:
                 f"{opponent.mention} 请在 {DUEL_TIMEOUT_SECONDS} 秒内接受或拒绝。",
                 view=view,
             )
+            return
+
+        # 抢劫：抢劫 @某人
+        if content.startswith(ROB_KEYWORD):
+            if not message.mentions:
+                await message.channel.send(
+                    f"🔫 用法：`抢劫 @某人`，50% 抢到对方 {ROB_MIN_AMOUNT}-{ROB_MAX_AMOUNT} 点，"
+                    f"50% 被反杀自己扣 {ROB_MIN_AMOUNT}-{ROB_MAX_AMOUNT} 点"
+                    f"（每次额度交换销毁 {ROB_FEE} 点，需额度 ≥ {ROB_MIN_QUOTA} 点）。"
+                )
+                return
+            target = message.mentions[0]
+            if target.id == message.author.id:
+                await message.channel.send("🔫 不能抢劫自己。")
+                return
+            if target.bot:
+                await message.channel.send("🔫 不能抢劫机器人。")
+                return
+            now = time.monotonic()
+            cooldown_until = rob_cooldowns.get(message.author.id, 0.0)
+            if now < cooldown_until:
+                remaining = int(cooldown_until - now) + 1
+                await message.channel.send(f"🔫 抢劫冷却中，请等待 {remaining} 秒后再试。")
+                return
+
+            robber_quota = await _query_quota(client, message.author.name)
+            if robber_quota is None:
+                await message.channel.send("🔫 查询额度失败，请稍后再试。")
+                return
+            if robber_quota < ROB_MIN_QUOTA:
+                await message.channel.send(
+                    f"🔫 你太穷了（当前 {robber_quota} 点），额度 ≥ {ROB_MIN_QUOTA} 点才有抢劫能力。"
+                )
+                return
+
+            rob_cooldowns[message.author.id] = now + ROB_COOLDOWN_SECONDS
+            amount = random.randint(ROB_MIN_AMOUNT, ROB_MAX_AMOUNT)
+            success = random.random() < 0.5
+
+            if success:
+                # 抢劫成功：对方有多少扣多少（最多 amount），销毁 ROB_FEE 点
+                target_quota = await _query_quota(client, target.name)
+                if target_quota is None:
+                    await message.channel.send("🔫 查询对方额度失败，抢劫取消。")
+                    return
+                stolen = min(amount, target_quota)
+                if stolen <= 0:
+                    await message.channel.send(
+                        f"🔫 {message.author.mention} 抢劫 {target.mention}，但对方身无分文，一无所获！"
+                    )
+                    return
+                deducted = await _adjust_quota(client, "deduct", target.name, stolen)
+                if deducted is None:
+                    await message.channel.send("🔫 抢劫失败，请稍后再试。")
+                    return
+                gain = stolen - ROB_FEE
+                if gain > 0:
+                    new_quota = await _adjust_quota(client, "grant", message.author.name, gain)
+                    if new_quota is None:
+                        await _adjust_quota(client, "grant", target.name, stolen)
+                        await message.channel.send("🔫 转账失败，已退回对方额度。")
+                        return
+                else:
+                    new_quota = robber_quota
+                await message.channel.send(
+                    f"🔫 {message.author.mention} 抢劫 {target.mention} 成功！\n"
+                    f"抢到 **{stolen} 点**（销毁 {ROB_FEE} 点，实得 {gain} 点，当前 {new_quota} 点），"
+                    f"{target.mention} 剩余 {deducted} 点。"
+                )
+            else:
+                # 被反杀：自己扣 amount（有多少扣多少），全销毁
+                loss = min(amount, robber_quota)
+                new_quota = await _adjust_quota(client, "deduct", message.author.name, loss)
+                if new_quota is None:
+                    await message.channel.send("🔫 结算失败，请稍后再试。")
+                    return
+                await message.channel.send(
+                    f"🛡️ {message.author.mention} 抢劫 {target.mention} 被反杀！\n"
+                    f"被扣除 **{loss} 点**（已销毁），当前额度 {new_quota} 点。"
+                )
             return
 
         # 红包
