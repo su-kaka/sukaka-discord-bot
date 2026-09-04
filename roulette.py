@@ -32,6 +32,19 @@ BEG_COST = 7
 BEG_TIMEOUT_SECONDS = 60
 BEG_COOLDOWN_SECONDS = 60
 
+DUEL_KEYWORD = "决斗"
+DUEL_BET = 6
+DUEL_PRIZE = 10  # 12 - 2 销毁
+DUEL_TIMEOUT_SECONDS = 60
+DUEL_COOLDOWN_SECONDS = 30
+
+RED_PACKET_KEYWORD = "红包"
+RED_PACKET_COST = 10
+RED_PACKET_MAX_GRABBERS = 8
+RED_PACKET_POOL = 8  # 10 - 2 销毁，随机分给抢红包的人
+RED_PACKET_TIMEOUT_SECONDS = 60
+RED_PACKET_COOLDOWN_SECONDS = 30
+
 
 async def _query_quota(client: httpx.AsyncClient, username: str) -> Optional[int]:
     api_key = os.getenv("ACTIVITY_QUOTA_API_KEY")
@@ -157,6 +170,236 @@ class BegView(discord.ui.View):
             await self.message.edit(
                 content=f"🙏 {self.beggar.mention} 的乞讨无人理会，已过期。", view=None
             )
+
+
+class DuelView(discord.ui.View):
+    """决斗视图：被挑战者接受后，双方各押 6 点 roll 点，赢家得 10 点（2 点销毁）。"""
+
+    def __init__(
+        self,
+        challenger: discord.Member | discord.User,
+        opponent: discord.Member | discord.User,
+        client: httpx.AsyncClient,
+        on_finish: Optional[object] = None,
+    ) -> None:
+        super().__init__(timeout=DUEL_TIMEOUT_SECONDS)
+        self.challenger = challenger
+        self.opponent = opponent
+        self.client = client
+        self.message: Optional[discord.Message] = None
+        self.completed = False
+        self._on_finish = on_finish
+
+    def _finish(self) -> None:
+        if callable(self._on_finish):
+            self._on_finish()
+
+    @discord.ui.button(label="接受决斗（押 6 点）", style=discord.ButtonStyle.danger, emoji="⚔️")
+    async def accept_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        user = interaction.user
+        if user.id == self.challenger.id:
+            await interaction.response.send_message("不能和自己决斗。", ephemeral=True)
+            return
+        if user.id != self.opponent.id:
+            await interaction.response.send_message("只有被挑战者能接受决斗。", ephemeral=True)
+            return
+        if self.completed:
+            await interaction.response.send_message("决斗已结束。", ephemeral=True)
+            return
+
+        # 检查双方额度
+        for player in (self.challenger, self.opponent):
+            quota = await _query_quota(self.client, player.name)
+            if quota is None:
+                await interaction.response.send_message(
+                    f"查询 {player.display_name} 额度失败，请稍后再试。", ephemeral=True
+                )
+                return
+            if quota < DUEL_BET:
+                await interaction.response.send_message(
+                    f"{player.display_name} 额度不足（当前 {quota} 点，需 {DUEL_BET} 点），决斗取消。",
+                    ephemeral=True,
+                )
+                return
+
+        if self.completed:
+            await interaction.response.send_message("决斗已结束。", ephemeral=True)
+            return
+
+        # 收双方赌注
+        paid: list[discord.Member | discord.User] = []
+        for player in (self.challenger, self.opponent):
+            result = await _adjust_quota(self.client, "deduct", player.name, DUEL_BET)
+            if result is None:
+                for q in paid:
+                    await _adjust_quota(self.client, "grant", q.name, DUEL_BET)
+                await interaction.response.send_message("收取赌注失败，决斗取消。", ephemeral=True)
+                return
+            paid.append(player)
+
+        self.completed = True
+        self.stop()
+        self._finish()
+
+        # roll 点定胜负，平局加赛
+        c_roll, o_roll = random.randint(1, 100), random.randint(1, 100)
+        while c_roll == o_roll:
+            c_roll, o_roll = random.randint(1, 100), random.randint(1, 100)
+
+        winner, loser = (self.challenger, self.opponent) if c_roll > o_roll else (self.opponent, self.challenger)
+        w_roll, l_roll = max(c_roll, o_roll), min(c_roll, o_roll)
+
+        new_quota = await _adjust_quota(self.client, "grant", winner.name, DUEL_PRIZE)
+        result_text = (
+            f"⚔️ **决斗结果**\n"
+            f"{self.challenger.mention} rolled **{c_roll}**\n"
+            f"{self.opponent.mention} rolled **{o_roll}**\n"
+        )
+        if new_quota is None:
+            result_text += f"🏆 {winner.mention} 获胜！但奖金发放失败，请联系管理员手动补发 {DUEL_PRIZE} 点。"
+        else:
+            result_text += (
+                f"🏆 {winner.mention} 获胜，赢得 **{DUEL_PRIZE} 点**"
+                f"（奖池 {DUEL_BET * 2} 点，2 点销毁）！当前额度 {new_quota} 点。"
+            )
+
+        await interaction.response.send_message(result_text)
+        if self.message:
+            await self.message.edit(view=None)
+
+    @discord.ui.button(label="拒绝", style=discord.ButtonStyle.secondary, emoji="🏳️")
+    async def decline_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        if interaction.user.id != self.opponent.id:
+            await interaction.response.send_message("只有被挑战者能拒绝。", ephemeral=True)
+            return
+        if self.completed:
+            return
+        self.completed = True
+        self.stop()
+        self._finish()
+        await interaction.response.send_message(
+            f"🏳️ {self.opponent.mention} 拒绝了 {self.challenger.mention} 的决斗。"
+        )
+        if self.message:
+            await self.message.edit(view=None)
+
+    async def on_timeout(self) -> None:
+        if self.completed:
+            return
+        self._finish()
+        if self.message:
+            await self.message.edit(
+                content=f"⚔️ {self.opponent.mention} 未应战，{self.challenger.mention} 的决斗已过期。",
+                view=None,
+            )
+
+
+def _split_random(pool: int, count: int) -> list[int]:
+    """把 pool 点随机分成 count 份，每份至少 1 点。"""
+    if count <= 0:
+        return []
+    if count == 1:
+        return [pool]
+    cuts = sorted(random.sample(range(1, pool), count - 1))
+    parts = [b - a for a, b in zip([0] + cuts, cuts + [pool])]
+    random.shuffle(parts)
+    return parts
+
+
+class RedPacketView(discord.ui.View):
+    """红包视图：发送者押 10 点，8 点随机分给抢红包的人（2 点销毁）。"""
+
+    def __init__(
+        self,
+        sender: discord.Member | discord.User,
+        client: httpx.AsyncClient,
+        on_finish: Optional[object] = None,
+    ) -> None:
+        super().__init__(timeout=RED_PACKET_TIMEOUT_SECONDS)
+        self.sender = sender
+        self.client = client
+        self.message: Optional[discord.Message] = None
+        self.completed = False
+        self.grabbers: list[discord.Member | discord.User] = []
+        self._on_finish = on_finish
+
+    def _finish(self) -> None:
+        if callable(self._on_finish):
+            self._on_finish()
+
+    def _packet_text(self) -> str:
+        names = "、".join(u.mention for u in self.grabbers) or "暂无"
+        return (
+            f"🧧 {self.sender.mention} 发了一个红包！（{len(self.grabbers)}/{RED_PACKET_MAX_GRABBERS}）\n"
+            f"{RED_PACKET_POOL} 点随机分给抢红包的人（红包 {RED_PACKET_COST} 点，2 点销毁），手快有手慢无！\n"
+            f"已参与：{names}\n"
+            f"满 {RED_PACKET_MAX_GRABBERS} 人立即开奖，{RED_PACKET_TIMEOUT_SECONDS} 秒未满按参与人数开奖。"
+        )
+
+    @discord.ui.button(label="抢红包", style=discord.ButtonStyle.danger, emoji="🧧")
+    async def grab_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        user = interaction.user
+        if user.id == self.sender.id:
+            await interaction.response.send_message("不能抢自己的红包。", ephemeral=True)
+            return
+        if self.completed:
+            await interaction.response.send_message("红包已开奖。", ephemeral=True)
+            return
+        if any(u.id == user.id for u in self.grabbers):
+            await interaction.response.send_message("你已经参与了。", ephemeral=True)
+            return
+
+        # 原子加入：append 与满员判断之间不插入 await
+        self.grabbers.append(user)
+        is_full = len(self.grabbers) >= RED_PACKET_MAX_GRABBERS
+        if is_full:
+            self.completed = True
+            self.stop()
+
+        await interaction.response.send_message(
+            f"🧧 已参与 {self.sender.mention} 的红包（{len(self.grabbers)}/{RED_PACKET_MAX_GRABBERS}），"
+            "等待开奖！",
+            ephemeral=True,
+        )
+
+        if is_full:
+            await self._settle()
+        elif self.message:
+            await self.message.edit(content=self._packet_text(), view=self)
+
+    async def _settle(self) -> None:
+        """开奖：把奖池随机分给参与者。"""
+        self._finish()
+        shares = _split_random(RED_PACKET_POOL, len(self.grabbers))
+        results: list[tuple[discord.Member | discord.User, int, Optional[int]]] = []
+        for user, amount in zip(self.grabbers, shares):
+            new_quota = await _adjust_quota(self.client, "grant", user.name, amount)
+            results.append((user, amount, new_quota))
+
+        lines = [f"🧧 {self.sender.mention} 的红包开奖！（{len(self.grabbers)} 人参与，奖池 {RED_PACKET_POOL} 点）"]
+        for user, amount, new_quota in sorted(results, key=lambda r: r[1], reverse=True):
+            if new_quota is None:
+                lines.append(f"{user.mention} 抢到 **{amount} 点**（发放失败，请联系管理员）")
+            else:
+                lines.append(f"{user.mention} 抢到 **{amount} 点**（当前 {new_quota} 点）")
+
+        if self.message:
+            await self.message.edit(content="\n".join(lines), view=None)
+
+    async def on_timeout(self) -> None:
+        if self.completed:
+            return
+        if not self.grabbers:
+            self._finish()
+            await _adjust_quota(self.client, "grant", self.sender.name, RED_PACKET_COST)
+            if self.message:
+                await self.message.edit(
+                    content=f"🧧 {self.sender.mention} 的红包无人参与，已退回 {RED_PACKET_COST} 点。",
+                    view=None,
+                )
+            return
+        # 有人参与则按参与人数开奖
+        await self._settle()
 
 
 class JoinView(discord.ui.View):
@@ -311,6 +554,8 @@ def start_roulette(bot: "SukakaBot") -> None:
     last_trigger_time: dict[str, float] = {"time": 0.0}
     active_begs: dict[int, BegView] = {}
     beg_cooldowns: dict[int, float] = {}
+    duel_cooldowns: dict[int, float] = {}
+    red_packet_cooldowns: dict[int, float] = {}
 
     @bot.event
     async def on_message(message: discord.Message) -> None:
@@ -319,7 +564,72 @@ def start_roulette(bot: "SukakaBot") -> None:
         if message.author.bot:
             return
 
-        if message.content.strip() == BEG_KEYWORD:
+        content = message.content.strip()
+
+        # 决斗：决斗 @某人
+        if content.startswith(DUEL_KEYWORD):
+            if not message.mentions:
+                await message.channel.send("⚔️ 用法：`决斗 @某人`，双方各押 6 点，赢家得 10 点。")
+                return
+            opponent = message.mentions[0]
+            if opponent.id == message.author.id:
+                await message.channel.send("⚔️ 不能和自己决斗。")
+                return
+            if opponent.bot:
+                await message.channel.send("⚔️ 不能和机器人决斗。")
+                return
+            now = time.monotonic()
+            cooldown_until = duel_cooldowns.get(message.author.id, 0.0)
+            if now < cooldown_until:
+                remaining = int(cooldown_until - now) + 1
+                await message.channel.send(f"⚔️ 决斗冷却中，请等待 {remaining} 秒后再试。")
+                return
+
+            def _duel_cooldown(user_id: int = message.author.id) -> None:
+                duel_cooldowns[user_id] = time.monotonic() + DUEL_COOLDOWN_SECONDS
+
+            view = DuelView(message.author, opponent, client, on_finish=_duel_cooldown)
+            view.message = await message.channel.send(
+                f"⚔️ {message.author.mention} 向 {opponent.mention} 发起决斗！\n"
+                f"双方各押 {DUEL_BET} 点，roll 点定胜负，赢家得 {DUEL_PRIZE} 点（2 点销毁）。\n"
+                f"{opponent.mention} 请在 {DUEL_TIMEOUT_SECONDS} 秒内接受或拒绝。",
+                view=view,
+            )
+            return
+
+        # 红包
+        if content == RED_PACKET_KEYWORD:
+            now = time.monotonic()
+            cooldown_until = red_packet_cooldowns.get(message.author.id, 0.0)
+            if now < cooldown_until:
+                remaining = int(cooldown_until - now) + 1
+                await message.channel.send(f"🧧 红包冷却中，请等待 {remaining} 秒后再试。")
+                return
+
+            quota = await _query_quota(client, message.author.name)
+            if quota is None:
+                await message.channel.send("🧧 查询额度失败，请稍后再试。")
+                return
+            if quota < RED_PACKET_COST:
+                await message.channel.send(
+                    f"🧧 额度不足：当前 {quota} 点，发红包需要 {RED_PACKET_COST} 点。"
+                )
+                return
+
+            # 先扣款再发红包
+            result = await _adjust_quota(client, "deduct", message.author.name, RED_PACKET_COST)
+            if result is None:
+                await message.channel.send("🧧 扣除额度失败，请稍后再试。")
+                return
+
+            def _rp_cooldown(user_id: int = message.author.id) -> None:
+                red_packet_cooldowns[user_id] = time.monotonic() + RED_PACKET_COOLDOWN_SECONDS
+
+            view = RedPacketView(message.author, client, on_finish=_rp_cooldown)
+            view.message = await message.channel.send(view._packet_text(), view=view)
+            return
+
+        if content == BEG_KEYWORD:
             existing = active_begs.get(message.author.id)
             if existing and not existing.completed and not existing.is_finished():
                 await message.channel.send("🙏 你已有一个进行中的乞讨，等结束后再试。")
@@ -344,7 +654,7 @@ def start_roulette(bot: "SukakaBot") -> None:
             active_begs[message.author.id] = view
             return
 
-        if message.content.strip() == TRIGGER_KEYWORD:
+        if content == TRIGGER_KEYWORD:
             game = active_game["game"]
             if game and not game.finished:
                 await message.channel.send("🎲 已有一局正在报名中，等结束后再开新局。")
