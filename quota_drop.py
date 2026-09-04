@@ -100,67 +100,64 @@ async def _call_quota_api(
         return None
 
 
-def start_quota_drop(bot: "SukakaBot") -> None:
-    """注册发言监听，开始掉落服务。"""
-    _init_db()
-    client = httpx.AsyncClient(timeout=API_TIMEOUT_SECONDS)
+async def handle_drop_message(client: httpx.AsyncClient, message: discord.Message) -> None:
+    """处理一条发言的掉落逻辑（由统一的消息入口调用）。"""
+    discord_id = str(message.author.id)
+    username = message.author.name
 
-    @bot.event
-    async def on_message(message: discord.Message) -> None:
-        if message.channel.id != QUOTA_CHANNEL_ID:
-            return
-        if message.author.bot:
-            return
+    amount = _roll_drop_amount()
+    cooldown_seconds = random.uniform(COOLDOWN_MIN_SECONDS, COOLDOWN_MAX_SECONDS)
+    cooldown_until = time.time() + cooldown_seconds
 
-        discord_id = str(message.author.id)
-        username = message.author.name
+    # 原子检查+写入冷却；无论结果如何都进冷却
+    if not _try_set_cooldown(discord_id, cooldown_until):
+        return
 
-        amount = _roll_drop_amount()
-        cooldown_seconds = random.uniform(COOLDOWN_MIN_SECONDS, COOLDOWN_MAX_SECONDS)
-        cooldown_until = time.time() + cooldown_seconds
-
-        # 原子检查+写入冷却；无论结果如何都进冷却
-        if not _try_set_cooldown(discord_id, cooldown_until):
-            return
-
-        # 10% 概率触发扣减事件
-        if random.random() < DEDUCT_CHANCE:
-            deduct_amount = random.randint(DEDUCT_MIN, DEDUCT_MAX)
-            current_quota = await _call_quota_api(client, "deduct", username, deduct_amount)
-            if current_quota is None:
-                return
-            print(f"[QuotaDrop] {username} 被扣减 {deduct_amount} 点，当前额度 {current_quota}，冷却 {cooldown_seconds:.0f} 秒")
-            try:
-                await message.channel.send(
-                    f"💸 {message.author.mention} 运气不佳，被扣减 {deduct_amount} 点活动额度，当前额度 {current_quota} 点……",
-                    delete_after=NOTIFY_DELETE_AFTER,
-                )
-            except (discord.Forbidden, discord.HTTPException) as exc:
-                print(f"[QuotaDrop] 提醒发送失败：{exc}")
-            return
-
-        if amount == 0:
-            print(f"[QuotaDrop] {username} 掉落 0 点，冷却 {cooldown_seconds:.0f} 秒")
-            try:
-                await message.channel.send(
-                    f"💨 {message.author.mention} 很遗憾，这次没有掉落额度，下次好运！",
-                    delete_after=NOTIFY_DELETE_AFTER,
-                )
-            except (discord.Forbidden, discord.HTTPException) as exc:
-                print(f"[QuotaDrop] 提醒发送失败：{exc}")
-            return
-
-        current_quota = await _call_quota_api(client, "grant", username, amount)
+    # 10% 概率触发扣减事件
+    if random.random() < DEDUCT_CHANCE:
+        deduct_amount = random.randint(DEDUCT_MIN, DEDUCT_MAX)
+        current_quota = await _call_quota_api(client, "deduct", username, deduct_amount)
         if current_quota is None:
             return
-
-        print(f"[QuotaDrop] {username} 掉落 {amount} 点，当前额度 {current_quota}，冷却 {cooldown_seconds:.0f} 秒")
+        print(f"[QuotaDrop] {username} 被扣减 {deduct_amount} 点，当前额度 {current_quota}，冷却 {cooldown_seconds:.0f} 秒")
         try:
             await message.channel.send(
-                f"🎉 {message.author.mention} 幸运掉落 {amount} 点活动额度，当前额度 {current_quota} 点！",
+                f"💸 {message.author.mention} 运气不佳，被扣减 {deduct_amount} 点活动额度，当前额度 {current_quota} 点……",
                 delete_after=NOTIFY_DELETE_AFTER,
             )
         except (discord.Forbidden, discord.HTTPException) as exc:
             print(f"[QuotaDrop] 提醒发送失败：{exc}")
+        return
 
+    if amount == 0:
+        print(f"[QuotaDrop] {username} 掉落 0 点，冷却 {cooldown_seconds:.0f} 秒")
+        try:
+            await message.channel.send(
+                f"💨 {message.author.mention} 很遗憾，这次没有掉落额度，下次好运！",
+                delete_after=NOTIFY_DELETE_AFTER,
+            )
+        except (discord.Forbidden, discord.HTTPException) as exc:
+            print(f"[QuotaDrop] 提醒发送失败：{exc}")
+        return
+
+    current_quota = await _call_quota_api(client, "grant", username, amount)
+    if current_quota is None:
+        return
+
+    print(f"[QuotaDrop] {username} 掉落 {amount} 点，当前额度 {current_quota}，冷却 {cooldown_seconds:.0f} 秒")
+    try:
+        await message.channel.send(
+            f"🎉 {message.author.mention} 幸运掉落 {amount} 点活动额度，当前额度 {current_quota} 点！",
+            delete_after=NOTIFY_DELETE_AFTER,
+        )
+    except (discord.Forbidden, discord.HTTPException) as exc:
+        print(f"[QuotaDrop] 提醒发送失败：{exc}")
+
+
+def start_quota_drop(bot: "SukakaBot") -> httpx.AsyncClient:
+    """初始化掉落服务，返回共享的 HTTP 客户端。"""
+    _init_db()
+    client = httpx.AsyncClient(timeout=API_TIMEOUT_SECONDS)
+    bot.quota_drop_client = client  # type: ignore[attr-defined]
     print(f"[QuotaDrop] 已启动，监听频道 {QUOTA_CHANNEL_ID}，冷却数据库 {DB_PATH}")
+    return client
