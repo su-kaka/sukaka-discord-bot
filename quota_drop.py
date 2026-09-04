@@ -1,4 +1,4 @@
-"""发言随机掉落活动额度：监听目标频道发言，随机掉落 0-5 点额度，单用户冷却 1-20 分钟。"""
+"""发言随机掉落活动额度：监听目标频道发言，随机掉落 0-5 点额度，单用户冷却 1-60 分钟。"""
 
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ DB_PATH = Path(os.getenv("QUOTA_DROP_DB", "quota_drops.db"))
 DROP_MIN = 0
 DROP_MAX = 5
 COOLDOWN_MIN_SECONDS = 60
-COOLDOWN_MAX_SECONDS = 1200
+COOLDOWN_MAX_SECONDS = 3600
 NOTIFY_DELETE_AFTER = 10
 API_TIMEOUT_SECONDS = 15
 
