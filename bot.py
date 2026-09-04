@@ -59,6 +59,7 @@ class SukakaBot(discord.Client):
         intents = discord.Intents.default()
         intents.guilds = True
         intents.members = True
+        intents.message_content = True
         super().__init__(intents=intents)
 
         self.tree = app_commands.CommandTree(self)

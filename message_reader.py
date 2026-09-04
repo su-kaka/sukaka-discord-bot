@@ -1,4 +1,4 @@
-"""消息读取测试模块：用于验证 bot 是否有权限读取指定频道的历史消息。"""
+"""消息读取测试模块：验证 bot 是否能被动接收指定频道的新消息事件。"""
 
 from __future__ import annotations
 
@@ -12,84 +12,42 @@ if TYPE_CHECKING:
 
 # 目标频道 ID，可通过环境变量 MESSAGE_READER_CHANNEL_ID 覆盖
 DEFAULT_CHANNEL_ID = 1455038454772531311
-# 默认读取最近 10 条消息
-DEFAULT_LIMIT = 10
 
 
-async def test_read_messages(bot: "SukakaBot") -> None:
-    """读取指定频道的最近消息并打印到控制台。
+async def on_message(message: discord.Message) -> None:
+    """被动接收新消息事件并打印。
 
-    用于验证 bot 是否拥有该频道的 Read Message History 权限。
+    用于验证 bot 是否拥有该频道的消息事件接收权限
+    （需要 View Channel 权限 + Message Content Intent）。
     """
     channel_id = int(os.getenv("MESSAGE_READER_CHANNEL_ID", DEFAULT_CHANNEL_ID))
-    limit = int(os.getenv("MESSAGE_READER_LIMIT", DEFAULT_LIMIT))
 
-    channel = bot.get_channel(channel_id)
-    if channel is None:
-        try:
-            channel = await bot.fetch_channel(channel_id)
-        except discord.NotFound:
-            print(f"[MessageReader] 错误：找不到频道 {channel_id}")
-            return
-        except discord.Forbidden:
-            print(f"[MessageReader] 错误：没有权限访问频道 {channel_id}")
-            return
-        except discord.HTTPException as e:
-            print(f"[MessageReader] 错误：获取频道失败 - {e}")
-            return
-
-    if not isinstance(channel, (discord.TextChannel, discord.Thread)):
-        print(f"[MessageReader] 错误：频道 {channel_id} 不是文字频道或帖子（实际类型：{type(channel).__name__}）")
+    # 只打印目标频道的消息
+    if message.channel.id != channel_id:
         return
 
-    if isinstance(channel, discord.Thread):
-        if channel.archived:
-            print(f"[MessageReader] 警告：帖子 {channel_id} 已归档，可能无法读取消息")
-        # 私有帖子需要 bot 先加入才能读取消息
-        if not channel.me:
-            try:
-                await channel.join()
-                print(f"[MessageReader] 已加入帖子 #{channel.name}")
-            except discord.Forbidden:
-                print(f"[MessageReader] 警告：无法加入帖子 {channel_id}（可能是私有帖子且未被邀请）")
-            except discord.HTTPException as e:
-                print(f"[MessageReader] 警告：加入帖子失败 - {e}")
+    timestamp = message.created_at.strftime("%Y-%m-%d %H:%M:%S")
+    author = message.author.name
+    is_bot = message.author.bot
 
-    print(f"[MessageReader] 开始读取频道 #{channel.name} ({channel_id}) 的最近 {limit} 条消息...")
+    content = message.content
+    if not content and message.attachments:
+        content = f"[附件: {len(message.attachments)} 个]"
+    elif not content and message.embeds:
+        content = f"[嵌入消息: {len(message.embeds)} 个]"
+    elif not content:
+        content = "[空消息/无内容权限]"
 
-    try:
-        messages = [msg async for msg in channel.history(limit=limit)]
-    except discord.Forbidden:
-        print(f"[MessageReader] 错误：没有权限读取频道 {channel_id} 的消息历史")
-        print("[MessageReader] 请确认 bot 拥有该频道的 View Channel 和 Read Message History 权限")
-        if isinstance(channel, discord.Thread):
-            print("[MessageReader] 提示：对于帖子，bot 可能还需要先加入该帖子（await channel.join()）")
-        return
-    except discord.HTTPException as e:
-        print(f"[MessageReader] 错误：读取消息历史失败 - {e}")
-        return
-
-    if not messages:
-        print(f"[MessageReader] 频道 #{channel.name} 暂无消息")
-        return
-
-    print(f"[MessageReader] 成功读取 {len(messages)} 条消息：")
-    print("-" * 60)
-    for msg in reversed(messages):  # 按时间正序打印
-        timestamp = msg.created_at.strftime("%Y-%m-%d %H:%M:%S")
-        author = f"{msg.author.name}#{msg.author.discriminator}" if msg.author.discriminator != "0" else msg.author.name
-        content = msg.content[:100] + "..." if len(msg.content) > 100 else msg.content
-        if not content and msg.attachments:
-            content = f"[附件: {len(msg.attachments)} 个]"
-        elif not content and msg.embeds:
-            content = f"[嵌入消息: {len(msg.embeds)} 个]"
-        elif not content:
-            content = "[空消息]"
-        print(f"[{timestamp}] {author}: {content}")
-    print("-" * 60)
-    print(f"[MessageReader] 读取完成，bot 拥有频道 {channel_id} 的消息读取权限 ✓")
+    bot_tag = " [BOT]" if is_bot else ""
+    print(f"[MessageReader] [{timestamp}] {author}{bot_tag}: {content}")
 
 
 def start_message_reader(bot: "SukakaBot") -> None:
-    """在 bot ready 后启动消息读取测试。"""
-    bot.loop.create_task(test_read_messages(bot))
+    """注册 on_message 监听，开始被动接收消息。"""
+    channel_id = int(os.getenv("MESSAGE_READER_CHANNEL_ID", DEFAULT_CHANNEL_ID))
+    bot.add_listener(on_message)
+    print(f"[MessageReader] 已注册消息监听，等待频道 {channel_id} 的新消息...")
+    print("[MessageReader] 提示：若一直收不到消息，请检查：")
+    print("  1. bot 是否有该频道的 View Channel 权限")
+    print("  2. Developer Portal 是否已开启 Message Content Intent")
+    print("  3. 代码中 intents.message_content 是否为 True")
