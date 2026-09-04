@@ -561,17 +561,30 @@ class BigRedPacketView(discord.ui.View):
         for item in self.children:
             item.disabled = True  # type: ignore[union-attr]
 
+        # 先禁用按钮并提示开奖中，避免长时间无反馈
+        if self.message:
+            try:
+                await self.message.edit(content="🧧🧧 大红包开奖中…", view=self)
+            except (discord.NotFound, discord.HTTPException):
+                pass
+
         shares = _split_random_capped(
             BIG_RED_PACKET_POOL, len(self.grabbers), BIG_RED_PACKET_MAX_SHARE
         )
 
-        results: list[tuple[discord.Member | discord.User, int, Optional[int]]] = []
-        for user, amount in zip(self.grabbers, shares):
+        # 并发发放额度，避免串行等待
+        async def _grant(user: discord.Member | discord.User, amount: int) -> Optional[int]:
             if amount > 0:
-                new_quota = await _adjust_quota(self.client, "grant", user.name, amount)
-            else:
-                new_quota = None
-            results.append((user, amount, new_quota))
+                return await _adjust_quota(self.client, "grant", user.name, amount)
+            return None
+
+        quotas = await asyncio.gather(
+            *[_grant(user, amount) for user, amount in zip(self.grabbers, shares)]
+        )
+        results: list[tuple[discord.Member | discord.User, int, Optional[int]]] = [
+            (user, amount, quota)
+            for user, amount, quota in zip(self.grabbers, shares, quotas)
+        ]
 
         total_granted = sum(amount for _, amount, _ in results)
         lines = [
@@ -587,7 +600,10 @@ class BigRedPacketView(discord.ui.View):
                 lines.append(f"🧧 {user.mention} 抢到 **{amount} 点**（当前 {new_quota} 点）")
 
         if self.message:
-            await self.message.edit(content="\n".join(lines), view=None)
+            try:
+                await self.message.edit(content="\n".join(lines), view=None)
+            except (discord.NotFound, discord.HTTPException):
+                pass
 
     async def on_timeout(self) -> None:
         if self.completed:
