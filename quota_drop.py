@@ -118,7 +118,7 @@ def start_quota_drop(bot: "SukakaBot") -> None:
 
         print(f"[QuotaDrop] {username} 掉落 {amount} 点，当前额度 {current_quota}，冷却 {cooldown_seconds:.0f} 秒")
         try:
-            await message.reply(
+            await message.channel.send(
                 f"🎉 {message.author.mention} 幸运掉落 {amount} 点活动额度，当前额度 {current_quota} 点！",
                 delete_after=NOTIFY_DELETE_AFTER,
             )
