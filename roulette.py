@@ -53,6 +53,11 @@ ROB_MIN_QUOTA = 5  # 低于此额度无抢劫能力
 ROB_FEE = 1  # 每次额度交换销毁 1 点
 ROB_COOLDOWN_SECONDS = 60
 
+MARRY_KEYWORD = "结婚"
+MARRY_FEE = 10  # 手续费销毁
+MARRY_TIMEOUT_SECONDS = 60
+MARRY_COOLDOWN_SECONDS = 300
+
 
 async def _query_quota(client: httpx.AsyncClient, username: str) -> Optional[int]:
     api_key = os.getenv("ACTIVITY_QUOTA_API_KEY")
@@ -177,6 +182,119 @@ class BegView(discord.ui.View):
         if self.message:
             await self.message.edit(
                 content=f"🙏 {self.beggar.mention} 的乞讨无人理会，已过期。", view=None
+            )
+
+
+class MarryView(discord.ui.View):
+    """结婚视图：对方同意后，两人额度合并，扣 10 点手续费，剩余平分。"""
+
+    def __init__(
+        self,
+        proposer: discord.Member | discord.User,
+        partner: discord.Member | discord.User,
+        client: httpx.AsyncClient,
+        on_finish: Optional[object] = None,
+    ) -> None:
+        super().__init__(timeout=MARRY_TIMEOUT_SECONDS)
+        self.proposer = proposer
+        self.partner = partner
+        self.client = client
+        self.message: Optional[discord.Message] = None
+        self.completed = False
+        self._on_finish = on_finish
+
+    def _finish(self) -> None:
+        if callable(self._on_finish):
+            self._on_finish()
+
+    @discord.ui.button(label="我愿意 💍", style=discord.ButtonStyle.success, emoji="💍")
+    async def accept_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        user = interaction.user
+        if user.id == self.proposer.id:
+            await interaction.response.send_message("不能和自己结婚。", ephemeral=True)
+            return
+        if user.id != self.partner.id:
+            await interaction.response.send_message("只有被求婚者能接受。", ephemeral=True)
+            return
+        if self.completed:
+            await interaction.response.send_message("婚礼已结束。", ephemeral=True)
+            return
+
+        # 查询双方额度
+        p_quota = await _query_quota(self.client, self.proposer.name)
+        q_quota = await _query_quota(self.client, self.partner.name)
+        if p_quota is None or q_quota is None:
+            await interaction.response.send_message("查询额度失败，请稍后再试。", ephemeral=True)
+            return
+
+        total = p_quota + q_quota
+        if total < MARRY_FEE:
+            await interaction.response.send_message(
+                f"两人总额度仅 {total} 点，不足以支付 {MARRY_FEE} 点手续费，婚礼取消。",
+                ephemeral=True,
+            )
+            return
+
+        if self.completed:
+            await interaction.response.send_message("婚礼已结束。", ephemeral=True)
+            return
+
+        # 先清零双方，再平分（total - fee）
+        for player, quota in ((self.proposer, p_quota), (self.partner, q_quota)):
+            if quota > 0:
+                result = await _adjust_quota(self.client, "deduct", player.name, quota)
+                if result is None:
+                    await interaction.response.send_message("结算失败，请稍后再试。", ephemeral=True)
+                    return
+
+        share = (total - MARRY_FEE) // 2
+        bonus = (total - MARRY_FEE) % 2  # 奇数时多出 1 点给求婚者
+        p_share = share + bonus
+        q_share = share
+
+        p_new = await _adjust_quota(self.client, "grant", self.proposer.name, p_share)
+        q_new = await _adjust_quota(self.client, "grant", self.partner.name, q_share)
+
+        self.completed = True
+        for item in self.children:
+            item.disabled = True  # type: ignore[union-attr]
+        self._finish()
+
+        result_text = (
+            f"💍 **婚礼完成！** {self.proposer.mention} 和 {self.partner.mention} 结为夫妻！\n"
+            f"两人额度合并共 {total} 点，手续费 {MARRY_FEE} 点已销毁，剩余 {total - MARRY_FEE} 点平分。\n"
+            f"{self.proposer.mention} 分得 **{p_share} 点**（当前 {p_new if p_new is not None else '?'} 点）\n"
+            f"{self.partner.mention} 分得 **{q_share} 点**（当前 {q_new if q_new is not None else '?'} 点）"
+        )
+        await interaction.response.send_message(result_text)
+        if self.message:
+            await self.message.edit(view=None)
+
+    @discord.ui.button(label="拒绝", style=discord.ButtonStyle.secondary, emoji="💔")
+    async def decline_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        if interaction.user.id != self.partner.id:
+            await interaction.response.send_message("只有被求婚者能拒绝。", ephemeral=True)
+            return
+        if self.completed:
+            return
+        self.completed = True
+        for item in self.children:
+            item.disabled = True  # type: ignore[union-attr]
+        self._finish()
+        await interaction.response.send_message(
+            f"💔 {self.partner.mention} 拒绝了 {self.proposer.mention} 的求婚。"
+        )
+        if self.message:
+            await self.message.edit(view=None)
+
+    async def on_timeout(self) -> None:
+        if self.completed:
+            return
+        self._finish()
+        if self.message:
+            await self.message.edit(
+                content=f"💔 {self.partner.mention} 未回应，{self.proposer.mention} 的求婚已过期。",
+                view=None,
             )
 
 
@@ -579,6 +697,7 @@ def start_roulette(bot: "SukakaBot") -> None:
     duel_cooldowns: dict[int, float] = {}
     red_packet_cooldowns: dict[int, float] = {}
     rob_cooldowns: dict[int, float] = {}
+    marry_cooldowns: dict[int, float] = {}
 
     @bot.event
     async def on_message(message: discord.Message) -> None:
@@ -588,6 +707,40 @@ def start_roulette(bot: "SukakaBot") -> None:
             return
 
         content = message.content.strip()
+
+        # 结婚：结婚 @某人
+        if content.startswith(MARRY_KEYWORD):
+            if not message.mentions:
+                await message.channel.send(
+                    f"💍 用法：`结婚 @某人`，对方同意后两人额度合并，"
+                    f"扣 {MARRY_FEE} 点手续费，剩余平分。"
+                )
+                return
+            partner = message.mentions[0]
+            if partner.id == message.author.id:
+                await message.channel.send("💍 不能和自己结婚。")
+                return
+            if partner.bot:
+                await message.channel.send("💍 不能和机器人结婚。")
+                return
+            now = time.monotonic()
+            cooldown_until = marry_cooldowns.get(message.author.id, 0.0)
+            if now < cooldown_until:
+                remaining = int(cooldown_until - now) + 1
+                await message.channel.send(f"💍 求婚冷却中，请等待 {remaining} 秒后再试。")
+                return
+
+            def _marry_cooldown(user_id: int = message.author.id) -> None:
+                marry_cooldowns[user_id] = time.monotonic() + MARRY_COOLDOWN_SECONDS
+
+            view = MarryView(message.author, partner, client, on_finish=_marry_cooldown)
+            view.message = await message.channel.send(
+                f"💍 {message.author.mention} 向 {partner.mention} 求婚！\n"
+                f"同意后两人额度合并，扣 {MARRY_FEE} 点手续费，剩余平分。\n"
+                f"{partner.mention} 请在 {MARRY_TIMEOUT_SECONDS} 秒内回应。",
+                view=view,
+            )
+            return
 
         # 决斗：决斗 @某人
         if content.startswith(DUEL_KEYWORD):
