@@ -26,6 +26,11 @@ API_TIMEOUT_SECONDS = 15
 COOLDOWN_SECONDS = 10
 
 TRIGGER_KEYWORD = "赌大小"
+BEG_KEYWORD = "乞讨"
+BEG_RECEIVE = 5
+BEG_COST = 7
+BEG_TIMEOUT_SECONDS = 60
+BEG_COOLDOWN_SECONDS = 60
 
 
 async def _query_quota(client: httpx.AsyncClient, username: str) -> Optional[int]:
@@ -67,6 +72,89 @@ async def _adjust_quota(
         return None
     except (httpx.HTTPError, ValueError):
         return None
+
+
+class BegView(discord.ui.View):
+    """乞讨视图：他人点击施舍按钮，乞讨者得 5 点，施舍者扣 7 点。"""
+
+    def __init__(
+        self,
+        beggar: discord.Member | discord.User,
+        client: httpx.AsyncClient,
+        on_finish: Optional[object] = None,
+    ) -> None:
+        super().__init__(timeout=BEG_TIMEOUT_SECONDS)
+        self.beggar = beggar
+        self.client = client
+        self.message: Optional[discord.Message] = None
+        self.completed = False
+        self._on_finish = on_finish
+
+    def _finish(self) -> None:
+        """乞讨结束（成功或超时）时触发冷却回调。"""
+        if callable(self._on_finish):
+            self._on_finish()
+
+    @discord.ui.button(label=f"施舍（-{BEG_COST} 点）", style=discord.ButtonStyle.success, emoji="🪙")
+    async def give_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        giver = interaction.user
+        if giver.id == self.beggar.id:
+            await interaction.response.send_message("不能施舍给自己。", ephemeral=True)
+            return
+        if self.completed:
+            await interaction.response.send_message("这次乞讨已经结束了。", ephemeral=True)
+            return
+
+        quota = await _query_quota(self.client, giver.name)
+        if quota is None:
+            await interaction.response.send_message("查询额度失败，请稍后再试。", ephemeral=True)
+            return
+        if quota < BEG_COST:
+            await interaction.response.send_message(
+                f"额度不足：当前 {quota} 点，施舍需要至少 {BEG_COST} 点。", ephemeral=True
+            )
+            return
+
+        # 查询期间可能已被他人抢先施舍，重新检查
+        if self.completed:
+            await interaction.response.send_message("这次乞讨已经结束了。", ephemeral=True)
+            return
+
+        # 先扣施舍者，成功后再发乞讨者；失败则回滚
+        giver_quota = await _adjust_quota(self.client, "deduct", giver.name, BEG_COST)
+        if giver_quota is None:
+            await interaction.response.send_message("扣除额度失败，请稍后再试。", ephemeral=True)
+            return
+        beggar_quota = await _adjust_quota(self.client, "grant", self.beggar.name, BEG_RECEIVE)
+        if beggar_quota is None:
+            await _adjust_quota(self.client, "grant", giver.name, BEG_COST)
+            await interaction.response.send_message("发放额度失败，已退回你的额度。", ephemeral=True)
+            return
+
+        self.completed = True
+        self.stop()
+        self._finish()
+        await interaction.response.send_message(
+            f"🪙 感谢施舍！你已扣除 {BEG_COST} 点，当前额度 {giver_quota} 点。", ephemeral=True
+        )
+        if self.message:
+            await self.message.edit(
+                content=(
+                    f"🙏 {self.beggar.mention} 的乞讨已被 {giver.mention} 施舍！\n"
+                    f"{self.beggar.mention} 获得 {BEG_RECEIVE} 点（当前 {beggar_quota} 点），"
+                    f"{giver.mention} 扣除 {BEG_COST} 点（当前 {giver_quota} 点）。"
+                ),
+                view=None,
+            )
+
+    async def on_timeout(self) -> None:
+        if self.completed:
+            return
+        self._finish()
+        if self.message:
+            await self.message.edit(
+                content=f"🙏 {self.beggar.mention} 的乞讨无人理会，已过期。", view=None
+            )
 
 
 class JoinView(discord.ui.View):
@@ -219,12 +307,39 @@ def start_roulette(bot: "SukakaBot") -> None:
     client = httpx.AsyncClient(timeout=API_TIMEOUT_SECONDS)
     active_game: dict[str, Optional[DiceGame]] = {"game": None}
     last_trigger_time: dict[str, float] = {"time": 0.0}
+    active_begs: dict[int, BegView] = {}
+    beg_cooldowns: dict[int, float] = {}
 
     @bot.event
     async def on_message(message: discord.Message) -> None:
         if message.channel.id != QUOTA_CHANNEL_ID:
             return
         if message.author.bot:
+            return
+
+        if message.content.strip() == BEG_KEYWORD:
+            existing = active_begs.get(message.author.id)
+            if existing and not existing.completed and not existing.is_finished():
+                await message.channel.send("🙏 你已有一个进行中的乞讨，等结束后再试。")
+                return
+            now = time.monotonic()
+            cooldown_until = beg_cooldowns.get(message.author.id, 0.0)
+            if now < cooldown_until:
+                remaining = int(cooldown_until - now) + 1
+                await message.channel.send(f"🙏 乞讨冷却中，请等待 {remaining} 秒后再试。")
+                return
+
+            def _start_cooldown(user_id: int = message.author.id) -> None:
+                beg_cooldowns[user_id] = time.monotonic() + BEG_COOLDOWN_SECONDS
+
+            view = BegView(message.author, client, on_finish=_start_cooldown)
+            view.message = await message.channel.send(
+                f"🙏 {message.author.mention} 正在乞讨！\n"
+                f"点击按钮施舍：对方获得 {BEG_RECEIVE} 点，你扣除 {BEG_COST} 点"
+                f"（需额度 ≥ {BEG_COST} 点）。{BEG_TIMEOUT_SECONDS} 秒内有效。",
+                view=view,
+            )
+            active_begs[message.author.id] = view
             return
 
         if message.content.strip() == TRIGGER_KEYWORD:
