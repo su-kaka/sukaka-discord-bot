@@ -154,7 +154,52 @@ Authorization: Bearer 用户登录 Token
 }
 ```
 
-## 6. 错误响应
+## 6. 使用专用密钥查询指定用户额度
+
+该接口使用专用密钥鉴权，可以查询任意用户的活动额度。
+
+### 请求
+
+```http
+GET /api/activity-quota/query
+Content-Type: application/json
+X-Activity-Quota-Key: 你的活动额度专用密钥
+```
+
+请求体使用 `user_id` 或 `username` 指定目标用户：
+
+```json
+{
+  "username": "testuser"
+}
+```
+
+或：
+
+```json
+{
+  "user_id": 123
+}
+```
+
+### 成功响应
+
+```json
+{
+  "success": true,
+  "user_id": 123,
+  "username": "testuser",
+  "activity_quota": 250
+}
+```
+
+机器人可以播报：
+
+```text
+用户 testuser 当前活动额度为 250 点。
+```
+
+## 7. 错误响应
 
 ### 专用密钥错误
 
@@ -194,13 +239,31 @@ HTTP `422`。常见原因：
 - 同时提供了 `user_id` 和 `username`
 - `amount` 不是正整数
 
-## 7. Python 机器人示例
+## 8. Python 机器人示例
 
 ```python
 import requests
 
 BASE_URL = "https://你的域名"
 ACTIVITY_QUOTA_KEY = "你的活动额度专用密钥"
+
+
+def query_activity_quota(username: str) -> str:
+    response = requests.get(
+        f"{BASE_URL}/api/activity-quota/query",
+        headers={
+            "Content-Type": "application/json",
+            "X-Activity-Quota-Key": ACTIVITY_QUOTA_KEY,
+        },
+        json={"username": username},
+        timeout=15,
+    )
+    data = response.json()
+
+    if response.ok and data.get("success") is True:
+        return f"用户 {data['username']} 当前活动额度为 {data['activity_quota']} 点。"
+
+    return f"查询失败：{data.get('detail', '未知错误')}"
 
 
 def grant_activity_quota(username: str, amount: int) -> str:

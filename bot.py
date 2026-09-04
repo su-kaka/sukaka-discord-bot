@@ -18,6 +18,7 @@ from channel_admin import (
     schedule_channel_mute_restore,
 )
 from quota_drop import start_quota_drop
+from roulette import start_roulette
 
 load_dotenv()
 
@@ -73,6 +74,7 @@ class SukakaBot(discord.Client):
         self._carousel_started = False
         self._carousel_task: Optional[asyncio.Task[None]] = None
         self._quota_drop_started = False
+        self._roulette_started = False
         load_channel_mutes(self)
 
     async def setup_hook(self) -> None:
@@ -92,6 +94,9 @@ class SukakaBot(discord.Client):
         if not self._quota_drop_started:
             self._quota_drop_started = True
             start_quota_drop(self)
+        if not self._roulette_started:
+            self._roulette_started = True
+            start_roulette(self)
         print(f"Logged in as {self.user} ({self.user.id})")
 
 
