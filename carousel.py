@@ -7,7 +7,7 @@ import discord
 
 CAROUSEL_CHANNEL_ID = 1455038454772531311
 CAROUSEL_FILE = Path(os.getenv("CAROUSEL_FILE", "carousel.txt"))
-DEFAULT_CAROUSEL_INTERVAL_MINUTES = 5
+DEFAULT_CAROUSEL_INTERVAL_MINUTES = 2
 
 
 def carousel_interval_minutes() -> float:
