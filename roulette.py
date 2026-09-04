@@ -58,6 +58,10 @@ MARRY_FEE = 10  # 手续费销毁
 MARRY_TIMEOUT_SECONDS = 60
 MARRY_COOLDOWN_SECONDS = 300
 
+CURSE_KEYWORD = "诅咒"
+CURSE_COST = 10  # 诅咒费用，全销毁
+CURSE_COOLDOWN_SECONDS = 300
+
 
 async def _query_quota(client: httpx.AsyncClient, username: str) -> Optional[int]:
     api_key = os.getenv("ACTIVITY_QUOTA_API_KEY")
@@ -307,6 +311,7 @@ class DuelView(discord.ui.View):
         opponent: discord.Member | discord.User,
         client: httpx.AsyncClient,
         on_finish: Optional[object] = None,
+        cursed_users: Optional[set[int]] = None,
     ) -> None:
         super().__init__(timeout=DUEL_TIMEOUT_SECONDS)
         self.challenger = challenger
@@ -315,6 +320,7 @@ class DuelView(discord.ui.View):
         self.message: Optional[discord.Message] = None
         self.completed = False
         self._on_finish = on_finish
+        self._cursed_users = cursed_users if cursed_users is not None else set()
 
     def _finish(self) -> None:
         if callable(self._on_finish):
@@ -372,14 +378,27 @@ class DuelView(discord.ui.View):
         while c_roll == o_roll:
             c_roll, o_roll = random.randint(1, 100), random.randint(1, 100)
 
-        winner, loser = (self.challenger, self.opponent) if c_roll > o_roll else (self.opponent, self.challenger)
-        w_roll, l_roll = max(c_roll, o_roll), min(c_roll, o_roll)
+        # 诅咒生效：被诅咒者决斗必输
+        curse_note = ""
+        c_cursed = self.challenger.id in self._cursed_users
+        o_cursed = self.opponent.id in self._cursed_users
+        if c_cursed and not o_cursed:
+            self._cursed_users.discard(self.challenger.id)
+            winner, loser = self.opponent, self.challenger
+            curse_note = f"\n🔮 诅咒生效！{self.challenger.mention} 注定失败！"
+        elif o_cursed and not c_cursed:
+            self._cursed_users.discard(self.opponent.id)
+            winner, loser = self.challenger, self.opponent
+            curse_note = f"\n🔮 诅咒生效！{self.opponent.mention} 注定失败！"
+        else:
+            winner, loser = (self.challenger, self.opponent) if c_roll > o_roll else (self.opponent, self.challenger)
 
         new_quota = await _adjust_quota(self.client, "grant", winner.name, DUEL_PRIZE)
         result_text = (
             f"⚔️ **决斗结果**\n"
             f"{self.challenger.mention} rolled **{c_roll}**\n"
             f"{self.opponent.mention} rolled **{o_roll}**\n"
+            f"{curse_note}"
         )
         if new_quota is None:
             result_text += f"🏆 {winner.mention} 获胜！但奖金发放失败，请联系管理员手动补发 {DUEL_PRIZE} 点。"
@@ -698,6 +717,8 @@ def start_roulette(bot: "SukakaBot") -> None:
     red_packet_cooldowns: dict[int, float] = {}
     rob_cooldowns: dict[int, float] = {}
     marry_cooldowns: dict[int, float] = {}
+    curse_cooldowns: dict[int, float] = {}
+    cursed_users: set[int] = set()  # 被诅咒的用户 ID
 
     @bot.event
     async def on_message(message: discord.Message) -> None:
@@ -742,6 +763,54 @@ def start_roulette(bot: "SukakaBot") -> None:
             )
             return
 
+        # 诅咒：诅咒 @某人
+        if content.startswith(CURSE_KEYWORD):
+            if not message.mentions:
+                await message.channel.send(
+                    f"🔮 用法：`诅咒 @某人`，押 {CURSE_COST} 点（全销毁），"
+                    "被诅咒者下次抢劫必被反杀、决斗必输，生效一次后解除。"
+                )
+                return
+            target = message.mentions[0]
+            if target.id == message.author.id:
+                await message.channel.send("🔮 不能诅咒自己。")
+                return
+            if target.bot:
+                await message.channel.send("🔮 不能诅咒机器人。")
+                return
+            if target.id in cursed_users:
+                await message.channel.send(f"🔮 {target.mention} 已经身中诅咒了。")
+                return
+            now = time.monotonic()
+            cooldown_until = curse_cooldowns.get(message.author.id, 0.0)
+            if now < cooldown_until:
+                remaining = int(cooldown_until - now) + 1
+                await message.channel.send(f"🔮 诅咒冷却中，请等待 {remaining} 秒后再试。")
+                return
+
+            quota = await _query_quota(client, message.author.name)
+            if quota is None:
+                await message.channel.send("🔮 查询额度失败，请稍后再试。")
+                return
+            if quota < CURSE_COST:
+                await message.channel.send(
+                    f"🔮 额度不足：当前 {quota} 点，诅咒需要 {CURSE_COST} 点。"
+                )
+                return
+
+            result = await _adjust_quota(client, "deduct", message.author.name, CURSE_COST)
+            if result is None:
+                await message.channel.send("🔮 扣除额度失败，请稍后再试。")
+                return
+
+            curse_cooldowns[message.author.id] = now + CURSE_COOLDOWN_SECONDS
+            cursed_users.add(target.id)
+            await message.channel.send(
+                f"🔮 {message.author.mention} 诅咒了 {target.mention}！\n"
+                f"{target.mention} 下次抢劫必被反杀、决斗必输（生效一次后解除）。"
+            )
+            return
+
         # 决斗：决斗 @某人
         if content.startswith(DUEL_KEYWORD):
             if not message.mentions:
@@ -764,7 +833,7 @@ def start_roulette(bot: "SukakaBot") -> None:
             def _duel_cooldown(user_id: int = message.author.id) -> None:
                 duel_cooldowns[user_id] = time.monotonic() + DUEL_COOLDOWN_SECONDS
 
-            view = DuelView(message.author, opponent, client, on_finish=_duel_cooldown)
+            view = DuelView(message.author, opponent, client, on_finish=_duel_cooldown, cursed_users=cursed_users)
             view.message = await message.channel.send(
                 f"⚔️ {message.author.mention} 向 {opponent.mention} 发起决斗！\n"
                 f"双方各押 {DUEL_BET} 点，roll 点定胜负，赢家得 {DUEL_PRIZE} 点（2 点销毁）。\n"
@@ -808,7 +877,16 @@ def start_roulette(bot: "SukakaBot") -> None:
 
             rob_cooldowns[message.author.id] = now + ROB_COOLDOWN_SECONDS
             amount = random.randint(ROB_MIN_AMOUNT, ROB_MAX_AMOUNT)
-            success = random.random() < 0.5
+
+            # 诅咒生效：被诅咒者抢劫必被反杀
+            if message.author.id in cursed_users:
+                cursed_users.discard(message.author.id)
+                success = False
+                await message.channel.send(
+                    f"🔮 诅咒生效！{message.author.mention} 的抢劫注定失败！"
+                )
+            else:
+                success = random.random() < 0.5
 
             if success:
                 # 抢劫成功：对方有多少扣多少（最多 amount），销毁 ROB_FEE 点
