@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import random
 import sqlite3
+import time
 from pathlib import Path
 
 import discord
@@ -14,6 +15,7 @@ from roulette.api import adjust_quota, query_quota
 from roulette.constants import (
     BANK_DB,
     BANK_DEPOSIT_PERCENT,
+    BANK_HEIST_TARGET_COOLDOWN_SECONDS,
     BANK_MIN_DEPOSIT,
     BANK_ROYAL_SECURITY_THRESHOLD,
     BANK_SECURITY_THRESHOLD,
