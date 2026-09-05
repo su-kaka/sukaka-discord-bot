@@ -17,6 +17,7 @@ from roulette.bank import (
     set_hatred,
     has_hatred,
 )
+from roulette.gacha import consume_effect
 from roulette.constants import (
     BANK_HEIST_BASE_SUCCESS,
     BANK_HEIST_COOLDOWN_SECONDS,
@@ -90,8 +91,6 @@ class BankHeistView(discord.ui.View):
         min_quota = BANK_HEIST_GEAR_MIN_QUOTA[gear_key]
         if quota < min_quota:
             return f"额度不足：当前 {quota} 点，{self._gear_display(gear_key)} 需要至少 {min_quota} 点。"
-        if has_hatred(user.id):
-            return "你有仇恨状态，无法参与抢银行。请先存钱解除仇恨。"
         return None
 
     async def _deduct_gear_cost(self, user: discord.Member | discord.User, gear_key: str) -> Optional[int]:
@@ -173,6 +172,16 @@ class BankHeistView(discord.ui.View):
         total_coefficient = sum(BANK_HEIST_GEAR_COEFFICIENTS[gear] for _, gear in self.members)
         total_success_bonus = sum(BANK_HEIST_GEAR_SUCCESS_BONUS[gear] for _, gear in self.members)
         success_rate = BANK_HEIST_BASE_SUCCESS + total_success_bonus
+
+        # 天神下凡：队伍里有人持有则成功率翻倍
+        avatar_used = False
+        for user, _ in self.members:
+            if consume_effect(user.id, "avatar"):
+                avatar_used = True
+                break
+        if avatar_used:
+            success_rate *= 2
+
         success_rate = min(success_rate, 95)  # 上限 95%
 
         # 随机选取 1-3 个目标
@@ -190,6 +199,9 @@ class BankHeistView(discord.ui.View):
         # 判定成功
         roll = random.random() * 100
         success = roll < success_rate
+
+        if avatar_used:
+            await self.message.channel.send("👼 **天神下凡生效！** 抢银行成功率翻倍！")
 
         if success:
             await self._settle_success(selected_targets, total_coefficient)
@@ -302,13 +314,6 @@ async def handle_bank_heist(
     if now < cooldown_until:
         remaining = int(cooldown_until - now) + 1
         await message.channel.send(f"🏦 抢银行冷却中，请等待 {remaining} 秒后再试。")
-        return
-
-    # 检查仇恨
-    if has_hatred(message.author.id):
-        await message.channel.send(
-            "🏦 你有仇恨状态，无法参与抢银行。请先存钱解除仇恨。"
-        )
         return
 
     # 检查额度

@@ -41,6 +41,7 @@ CARD_POOL: dict[str, tuple[str, str, int]] = {
     "seduce": ("诱惑", "强制和某人结婚（50% 概率失败）", 10),
     "robinhood": ("劫富济贫", "排名前十的用户随机分你 1-10 点", 10),
     "multidraw": ("十连抽", "下次抽卡自动抽十次", 10),
+    "avatar": ("天神下凡", "下次抢银行成功率翻倍", 10),
     "selfdestruct": ("自爆", f"额度归零，随机销毁 {GACHA_SELFDESTRUCT_MIN_PERCENT}%-{GACHA_SELFDESTRUCT_MAX_PERCENT}%，剩余生成红包供所有人抢", 10),
     "blank": ("空白", "无效果", 40),  # 实际概率由 GACHA_BLANK_CHANCE 控制
 }
