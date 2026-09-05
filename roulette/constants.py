@@ -100,6 +100,13 @@ BANK_HEIST_GEAR_MIN_QUOTA = {"knife": 10, "gun": 50, "armor": 100}  # 装备最�
 BANK_HEIST_GEAR_COEFFICIENTS = {"knife": 1, "gun": 5, "armor": 10}  # 收益系数
 BANK_HEIST_GEAR_SUCCESS_BONUS = {"knife": 5, "gun": 15, "armor": 30}  # 成功率加成（%）
 
+BANK_LOAN_KEYWORD = "贷款"
+BANK_LOAN_AMOUNT = 50  # 贷款额度
+BANK_LOAN_REPAY = 60  # 需还款额度
+BANK_LOAN_LENDER_GAIN = 55  # 借款账号实收
+BANK_LOAN_FEE = 5  # 手续费（销毁）
+BANK_LOAN_MIN_LENDER_BALANCE = 100  # 借款账号最低存款
+
 RULES_KEYWORD = "规则"
 
 BIG_RED_PACKET_INTERVAL_SECONDS = 360  # 机器人每 6 分钟发一次大红包

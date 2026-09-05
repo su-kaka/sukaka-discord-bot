@@ -238,13 +238,21 @@ async def _settle_robinhood(message: discord.Message, client: httpx.AsyncClient)
 
     total_gain = 0
     lines = [f"🎴 {message.author.mention} 发动 **劫富济贫**！"]
+    guild = message.guild
     for username, quota in top_users[:10]:
         if username == message.author.name or quota <= 0:
             continue
         # 皇家安保：无法被劫富济贫
-        # 通过用户名查找 discord_id 需要额外查询，这里用额度排行榜接口返回的用户名直接跳过
-        # 由于劫富济贫针对的是额度排行榜，而安保服务绑定的是银行存款，两者不同维度
-        # 简化处理：皇家安保用户不被劫富济贫（通过用户名匹配银行数据不可行，改为提示）
+        if guild:
+            member = guild.get_member_named(username)
+            if member is None:
+                member = discord.utils.find(
+                    lambda m: m.name == username or m.global_name == username,
+                    guild.members,
+                )
+            if member and has_royal_security_service(member.id):
+                lines.append(f"👑 {username} 有皇家安保，无法被劫富济贫！")
+                continue
         amount = random.randint(1, 10)
         stolen = min(amount, quota)
         deducted = await adjust_quota(client, "deduct", username, stolen)

@@ -7,6 +7,7 @@ import random
 import sqlite3
 import time
 from pathlib import Path
+from typing import Optional
 
 import discord
 import httpx
@@ -16,6 +17,11 @@ from roulette.constants import (
     BANK_DB,
     BANK_DEPOSIT_PERCENT,
     BANK_HEIST_TARGET_COOLDOWN_SECONDS,
+    BANK_LOAN_AMOUNT,
+    BANK_LOAN_FEE,
+    BANK_LOAN_LENDER_GAIN,
+    BANK_LOAN_MIN_LENDER_BALANCE,
+    BANK_LOAN_REPAY,
     BANK_MIN_DEPOSIT,
     BANK_ROYAL_SECURITY_THRESHOLD,
     BANK_SECURITY_THRESHOLD,
@@ -52,6 +58,16 @@ def _init_db() -> None:
             CREATE TABLE IF NOT EXISTS bank_heist_cooldowns (
                 discord_id INTEGER PRIMARY KEY,
                 cooldown_until REAL NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS bank_loans (
+                discord_id INTEGER PRIMARY KEY,
+                lender_id INTEGER NOT NULL,
+                remaining INTEGER NOT NULL,
+                created_at REAL NOT NULL
             )
             """
         )
@@ -168,6 +184,106 @@ def is_heist_cooldown(discord_id: int) -> bool:
     return row is not None and row[0] > now
 
 
+def get_loan(discord_id: int) -> Optional[tuple[int, int]]:
+    """查询未还清贷款，返回 (lender_id, remaining) 或 None。"""
+    with sqlite3.connect(DB_PATH) as conn:
+        row = conn.execute(
+            "SELECT lender_id, remaining FROM bank_loans WHERE discord_id = ?",
+            (discord_id,),
+        ).fetchone()
+    return (row[0], row[1]) if row else None
+
+
+def has_loan(discord_id: int) -> bool:
+    """是否有未还清贷款。"""
+    return get_loan(discord_id) is not None
+
+
+def _create_loan(discord_id: int, lender_id: int) -> None:
+    """创建贷款记录。"""
+    now = time.time()
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute(
+            "INSERT INTO bank_loans (discord_id, lender_id, remaining, created_at) VALUES (?, ?, ?, ?)",
+            (discord_id, lender_id, BANK_LOAN_REPAY, now),
+        )
+
+
+def _repay_loan(discord_id: int, amount: int) -> tuple[int, int, int]:
+    """还款，返回 (实还金额, 剩余欠款, lender_id)。"""
+    loan = get_loan(discord_id)
+    if loan is None:
+        return 0, 0, 0
+    lender_id, remaining = loan
+    repaid = min(amount, remaining)
+    new_remaining = remaining - repaid
+    with sqlite3.connect(DB_PATH) as conn:
+        if new_remaining <= 0:
+            conn.execute("DELETE FROM bank_loans WHERE discord_id = ?", (discord_id,))
+        else:
+            conn.execute(
+                "UPDATE bank_loans SET remaining = ? WHERE discord_id = ?",
+                (new_remaining, discord_id),
+            )
+    return repaid, new_remaining, lender_id
+
+
+def _pick_lender(exclude_id: int) -> Optional[tuple[int, int]]:
+    """随机选一个存款 ≥ BANK_LOAN_MIN_LENDER_BALANCE 的借款账号。"""
+    candidates = get_all_accounts_with_min_balance(BANK_LOAN_MIN_LENDER_BALANCE)
+    candidates = [(did, bal) for did, bal in candidates if did != exclude_id]
+    if not candidates:
+        return None
+    return random.choice(candidates)
+
+
+async def handle_loan(message: discord.Message, client: httpx.AsyncClient) -> None:
+    """处理「贷款」命令：向存款充足的用户借款 50 点，需还 60 点。"""
+    if has_loan(message.author.id):
+        loan = get_loan(message.author.id)
+        await message.channel.send(
+            f"🏦 你还有 **{loan[1]} 点** 贷款未还清，无法再次贷款！"
+        )
+        return
+
+    lender = _pick_lender(message.author.id)
+    if lender is None:
+        await message.channel.send(
+            f"🏦 贷款失败：没有存款 ≥ {BANK_LOAN_MIN_LENDER_BALANCE} 点的借款账号。"
+        )
+        return
+
+    lender_id, lender_balance = lender
+
+    # 从借款账号扣款
+    new_lender_balance = _deduct_balance(lender_id, BANK_LOAN_LENDER_GAIN)
+    actual_deducted = lender_balance - new_lender_balance
+    if actual_deducted < BANK_LOAN_LENDER_GAIN:
+        await message.channel.send("🏦 贷款失败：借款账号余额不足。")
+        return
+
+    # 给贷款用户发放额度
+    new_quota = await adjust_quota(client, "grant", message.author.name, BANK_LOAN_AMOUNT)
+    if new_quota is None:
+        # 发放失败，退回借款账号
+        _add_balance(lender_id, actual_deducted)
+        await message.channel.send("🏦 贷款发放失败，请稍后再试。")
+        return
+
+    # 创建贷款记录
+    _create_loan(message.author.id, lender_id)
+
+    lender_member = message.guild.get_member(lender_id) if message.guild else None
+    lender_display = lender_member.mention if lender_member else f"用户 {lender_id}"
+
+    await message.channel.send(
+        f"🏦 {message.author.mention} 成功贷款 **{BANK_LOAN_AMOUNT} 点**！\n"
+        f"借款账号：{lender_display}（被扣除 **{actual_deducted} 点** 存款）\n"
+        f"需还款 **{BANK_LOAN_REPAY} 点**（其中 {BANK_LOAN_LENDER_GAIN} 点归借款账号，{BANK_LOAN_FEE} 点手续费销毁）。\n"
+        f"💡 发送「存钱」将优先偿还贷款。"
+    )
+
+
 async def handle_deposit(message: discord.Message, client: httpx.AsyncClient) -> None:
     """处理「存钱」命令：将 50% 额度存入地精银行。"""
     quota = await query_quota(client, message.author.name)
@@ -188,14 +304,29 @@ async def handle_deposit(message: discord.Message, client: httpx.AsyncClient) ->
         await message.channel.send("🏦 扣除额度失败，请稍后再试。")
         return
 
+    # 优先还贷款
+    loan_note = ""
+    remaining_deposit = amount
+    if has_loan(message.author.id):
+        repaid, remaining_loan, lender_id = _repay_loan(message.author.id, amount)
+        remaining_deposit = amount - repaid
+        lender_member = message.guild.get_member(lender_id) if message.guild else None
+        lender_display = lender_member.mention if lender_member else f"用户 {lender_id}"
+        if remaining_loan <= 0:
+            loan_note = f"\n💳 已还清贷款 **{repaid} 点** 给 {lender_display}！"
+        else:
+            loan_note = f"\n💳 偿还贷款 **{repaid} 点** 给 {lender_display}，剩余欠款 **{remaining_loan} 点**。"
+
     # 仇恨没收
     hatred_note = ""
     if has_hatred(message.author.id):
         clear_hatred(message.author.id)
         hatred_note = "\n🔥 仇恨解除！本次存款被强制没收！"
         new_balance = _get_balance(message.author.id)
+    elif remaining_deposit > 0:
+        new_balance = _add_balance(message.author.id, remaining_deposit)
     else:
-        new_balance = _add_balance(message.author.id, amount)
+        new_balance = _get_balance(message.author.id)
 
     security_note = ""
     if has_royal_security_service(message.author.id):
@@ -204,7 +335,7 @@ async def handle_deposit(message: discord.Message, client: httpx.AsyncClient) ->
         security_note = f"\n🛡️ 存款超过 {BANK_SECURITY_THRESHOLD} 点，普通安保已解锁：无法被抢劫！"
     await message.channel.send(
         f"🏦 {message.author.mention} 存入 **{amount} 点** 到地精银行！\n"
-        f"银行余额：**{new_balance} 点**，当前额度：**{result} 点**。{security_note}{hatred_note}"
+        f"银行余额：**{new_balance} 点**，当前额度：**{result} 点**。{security_note}{hatred_note}{loan_note}"
     )
 
 

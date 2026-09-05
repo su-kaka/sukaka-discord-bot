@@ -31,6 +31,7 @@ from roulette.constants import (
     BANK_BALANCE_KEYWORD,
     BANK_HEIST_KEYWORD,
     BANK_KEYWORD,
+    BANK_LOAN_KEYWORD,
     BANK_WITHDRAW_KEYWORD,
     BANKER_KEYWORD,
     BANKER_MIN_QUOTA,
@@ -61,7 +62,7 @@ from roulette.constants import (
     SEDUCE_KEYWORD,
     TRIGGER_KEYWORD,
 )
-from roulette.bank import handle_bank_balance, handle_deposit, handle_withdraw
+from roulette.bank import handle_bank_balance, handle_deposit, handle_loan, handle_withdraw
 from roulette.bank_heist import handle_bank_heist
 from roulette.curse import handle_curse
 from roulette.dice_game import DiceGame
@@ -214,6 +215,11 @@ def start_roulette(bot: "SukakaBot") -> None:
             await handle_bank_balance(message)
             return
 
+        # 贷款：向存款充足的用户借款
+        if content == BANK_LOAN_KEYWORD:
+            await handle_loan(message, client)
+            return
+
         # 抢银行：三人组队抢劫银行
         if content == BANK_HEIST_KEYWORD:
             await handle_bank_heist(message, client, heist_cooldowns)
@@ -233,6 +239,7 @@ def start_roulette(bot: "SukakaBot") -> None:
                 "🎰 **梭哈**：押全部额度，50% 翻倍（一念天堂翻四倍），成功后扣 20% 手续费，失败清零。\n"
                 "🎴 **抽卡**：押额度的 10%（最少 10 点），50% 空白，其余获得魔法卡。\n"
                 "🏦 **地精银行**：发送「存钱」押 50%（最低 10 点），发送「取钱」随机扣 1%-50% 手续费。存款超 1000 点解锁普通安保（防抢劫），超 2000 点解锁皇家安保（防抢劫/诱惑/劫富济贫）。\n"
+                "💳 **贷款**：发送「贷款」随机向存款 ≥ 100 点的用户借款 50 点，需还 60 点（借款账号得 55 点，5 点手续费销毁）。未还清前无法再次贷款，存钱时优先偿还贷款。\n"
                 "🏦💰 **抢银行**：三人组队抢银行，随机选 1-3 个存款 ≥ 100 的目标，装备总和决定成功率（跑刀+5%/起枪+15%/全甲+30%），成功返还投入+收益，失败损失投入。\n"
                 "💥 **自爆**：额度归零，随机销毁 25%-50%，剩余生成红包。\n"
                 "🧧🧧 **大红包**：机器人每 6 分钟发 200 点，最多 10 人抢，每人 0-100 点。\n"
