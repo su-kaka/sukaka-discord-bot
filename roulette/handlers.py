@@ -31,6 +31,9 @@ from roulette.constants import (
     BANK_BALANCE_KEYWORD,
     BANK_KEYWORD,
     BANK_WITHDRAW_KEYWORD,
+    BANKER_KEYWORD,
+    BANKER_MIN_QUOTA,
+    BET_AMOUNT,
     COOLDOWN_SECONDS,
     CURSE_KEYWORD,
     DUEL_COOLDOWN_SECONDS,
@@ -75,8 +78,7 @@ if TYPE_CHECKING:
 def start_roulette(bot: "SukakaBot") -> None:
     """注册统一的消息入口：赌大小触发 + 发言掉落。"""
     client = httpx.AsyncClient(timeout=API_TIMEOUT_SECONDS)
-    active_game: dict[str, Optional[DiceGame]] = {"game": None}
-    last_trigger_time: dict[str, float] = {"time": 0.0}
+    current_banker: dict[str, Optional[discord.Member | discord.User]] = {"banker": None}
     active_begs: dict[int, BegView] = {}
     beg_cooldowns: dict[int, float] = {}
     duel_cooldowns: dict[int, float] = {}
@@ -214,11 +216,11 @@ def start_roulette(bot: "SukakaBot") -> None:
         if content == RULES_KEYWORD:
             rules = (
                 "📜 **游戏区规则**\n\n"
-                "🎲 **赌大小**：5 人局，每人押 5 点，赢家通吃（5 点销毁）。\n"
+                "🎲 **赌大小**：与庄家对赌，各押 5 点 roll 点，赢家得 9 点（1 点销毁）。发送「当庄家」可成为庄家，庄家破产自动切换为机器人庄家。\n"
                 "🙏 **乞讨**：发起乞讨，别人施舍你 5 点（施舍者扣 7 点）。\n"
                 "⚔️ **决斗**：双方押上额度最少者的全部额度，赢家获得 80%（20% 销毁），需 ≥ 10 点。\n"
                 "🧧 **红包**：押额度的 10%（最少 10 点），80% 分给最多 3 个幸运儿（20% 销毁）。\n"
-                "🔫 **抢劫**：50% 抢到对方 10%-30% 额度，50% 被反杀扣自己 10%-30%（抢到部分随机销毁 1%-50%），需 ≥ 10 点。\n"
+                "🔫 **抢劫**：50% 抢到对方 10%-30% 额度，50% 被反杀扣自己 10%-30%（抢到部分随机销毁 1%-50%，实得不超过自身额度），需 ≥ 10 点。\n"
                 "💍 **结婚**：两人额度合并，扣 10% 手续费（最低 10 点），剩余平分。\n"
                 "🔮 **诅咒**：押 10 点，被诅咒者下次抢劫必被反杀、决斗必输。\n"
                 "🎰 **梭哈**：押全部额度，50% 翻倍（一念天堂翻四倍），成功后扣 20% 手续费，失败清零。\n"
@@ -352,26 +354,36 @@ def start_roulette(bot: "SukakaBot") -> None:
             active_begs[message.author.id] = view
             return
 
+        # 当庄家：成为当前庄家（只能存在一个）
+        if content == BANKER_KEYWORD:
+            quota = await query_quota(client, message.author.name)
+            if quota is None:
+                await message.channel.send("🎲 查询额度失败，请稍后再试。")
+                return
+            if quota < BANKER_MIN_QUOTA:
+                await message.channel.send(
+                    f"🎲 额度不足：当前 {quota} 点，当庄家需要至少 {BANKER_MIN_QUOTA} 点。"
+                )
+                return
+            current_banker["banker"] = message.author
+            await message.channel.send(
+                f"🎲 {message.author.mention} 已成为当前庄家！\n"
+                f"其他玩家发送「赌大小」即可与庄家对赌。"
+            )
+            return
+
+        # 赌大小：与庄家对赌
         if content == TRIGGER_KEYWORD:
-            game = active_game["game"]
-            if game and not game.finished:
-                await message.channel.send("🎲 已有一局正在报名中，等结束后再开新局。")
-                return
-            now = time.monotonic()
-            elapsed = now - last_trigger_time["time"]
-            if elapsed < COOLDOWN_SECONDS:
-                remaining = int(COOLDOWN_SECONDS - elapsed) + 1
-                await message.channel.send(f"🎲 命令冷却中，请等待 {remaining} 秒后再试。")
-                return
-            last_trigger_time["time"] = now
-            game = DiceGame(bot, message.channel, client)
-            active_game["game"] = game
-            await game.open_lobby()
+            game = DiceGame(bot, message.channel, client, banker=current_banker["banker"])
+            await game.play(message.author)
+            # 如果庄家破产，清除庄家
+            if game.banker is None and current_banker["banker"] is not None:
+                current_banker["banker"] = None
             return
 
         await handle_drop_message(client, message)
 
-    print(f"[DiceGame] 已启动，在频道 {QUOTA_CHANNEL_ID} 发送「{TRIGGER_KEYWORD}」开局（{PLAYER_COUNT} 人局）")
+    print(f"[DiceGame] 已启动，在频道 {QUOTA_CHANNEL_ID} 发送「{TRIGGER_KEYWORD}」与庄家对赌，发送「{BANKER_KEYWORD}」成为庄家")
     print(
         f"[BigRedPacket] 已启动，每 {BIG_RED_PACKET_INTERVAL_SECONDS // 60} 分钟"
         f"在频道 {QUOTA_CHANNEL_ID} 发送 {BIG_RED_PACKET_POOL} 点大红包"
