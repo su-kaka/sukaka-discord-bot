@@ -217,13 +217,14 @@ def start_roulette(bot: "SukakaBot") -> None:
                 return
 
             stake = quota - ALLIN_FEE  # 扣手续费后的赌注
-            if random.random() < 0.5:
-                # 一念天堂生效：下次梭哈成功翻四倍
-                heaven = consume_effect(message.author.id, "heaven")
+            # 一念天堂生效：成功概率提升到 75%，成功翻四倍
+            heaven = consume_effect(message.author.id, "heaven")
+            success_chance = 0.75 if heaven else 0.5
+            if random.random() < success_chance:
                 multiplier = 4 if heaven else 2
                 prize = stake * multiplier
                 new_quota = await adjust_quota(client, "grant", message.author.name, prize)
-                heaven_note = "\n🃏 一念天堂生效！翻四倍！" if heaven else ""
+                heaven_note = "\n🃏 一念天堂生效！成功概率提升，翻四倍！" if heaven else ""
                 if new_quota is None:
                     await message.channel.send(
                         f"🎰 {message.author.mention} 梭哈 **{quota} 点** 翻倍成功！"

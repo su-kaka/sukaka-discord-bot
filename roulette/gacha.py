@@ -22,13 +22,13 @@ from roulette.constants import (
     GACHA_SEDUCE_SUCCESS_CHANCE,
     MARRY_FEE,
 )
-from roulette.utils import split_random
+from roulette.utils import make_arithmetic_question, split_random
 
 DB_PATH = Path(os.getenv("GACHA_DB", GACHA_DB))
 
 # 卡牌定义：key -> (名称, 描述, 权重)
 CARD_POOL: dict[str, tuple[str, str, int]] = {
-    "heaven": ("一念天堂", "下次梭哈成功翻四倍", 10),
+    "heaven": ("一念天堂", "下次梭哈成功概率提升到 75%，成功翻四倍", 10),
     "lucky": ("幸运儿", "下次抢红包必定最大", 10),
     "madman": ("狂徒", f"{GACHA_ROB_MAX_COUNT} 次内抢劫必定成功，抢劫 CD 缩短到 10 秒", 10),
     "weak": ("虚弱", f"{GACHA_ROB_MAX_COUNT} 次内被抢劫必定被抢成功", 10),
@@ -256,7 +256,11 @@ async def _settle_robinhood(message: discord.Message, client: httpx.AsyncClient)
 
 
 class SelfDestructPacketView(discord.ui.View):
-    """自爆红包：自爆者额度归零，奖池随机分给抢红包的人。"""
+    """自爆红包：自爆者额度归零，奖池随机分给抢红包的人。
+
+    参与前需通过人机验证：答对一道十以内加减法（三个选项仅一个正确），
+    答错即失去本次参与资格。
+    """
 
     def __init__(
         self,
@@ -271,27 +275,62 @@ class SelfDestructPacketView(discord.ui.View):
         self.message: Optional[discord.Message] = None
         self.completed = False
         self.grabbers: list[discord.Member | discord.User] = []
+        self.failed_users: set[int] = set()  # 答错失去资格的用户 ID
+        self.question, self.answer, options = make_arithmetic_question()
+        for value in options:
+            self.add_item(self._make_option_button(value))
+
+    def _make_option_button(self, value: int) -> discord.ui.Button:
+        """创建一个答案选项按钮，callback 绑定对应的数值。"""
+        button = discord.ui.Button(
+            label=str(value),
+            style=discord.ButtonStyle.danger,
+            emoji="💥",
+        )
+
+        async def _callback(interaction: discord.Interaction, option: int = value) -> None:
+            await self._answer(interaction, option)
+
+        button.callback = _callback
+        return button
 
     def _packet_text(self) -> str:
         names = "、".join(u.mention for u in self.grabbers) or "暂无"
         return (
             f"💥 {self.sender.mention} 自爆了一个红包！（{len(self.grabbers)}/10）\n"
             f"奖池 **{self.pool} 点** 随机分给抢红包的人，手快有手慢无！\n"
+            f"🧮 人机验证：**{self.question}**\n"
+            f"点击下方正确答案参与，答错将失去本次参与资格！\n"
             f"已参与：{names}\n"
             f"满 10 人立即开奖，60 秒未满按参与人数开奖。"
         )
 
-    @discord.ui.button(label="抢红包", style=discord.ButtonStyle.danger, emoji="💥")
-    async def grab_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+    async def _answer(self, interaction: discord.Interaction, option: int) -> None:
+        """处理选项点击：答对参与，答错失去资格。"""
         user = interaction.user
+        if user.bot:
+            await interaction.response.send_message("机器人不能抢红包。", ephemeral=True)
+            return
         if user.id == self.sender.id:
             await interaction.response.send_message("不能抢自己的自爆红包。", ephemeral=True)
             return
         if self.completed:
             await interaction.response.send_message("红包已开奖。", ephemeral=True)
             return
+        if user.id in self.failed_users:
+            await interaction.response.send_message(
+                "你已回答错误，失去本次参与资格。", ephemeral=True
+            )
+            return
         if any(u.id == user.id for u in self.grabbers):
             await interaction.response.send_message("你已经参与了。", ephemeral=True)
+            return
+
+        if option != self.answer:
+            self.failed_users.add(user.id)
+            await interaction.response.send_message(
+                "❌ 回答错误，已失去本次自爆红包参与资格！", ephemeral=True
+            )
             return
 
         self.grabbers.append(user)
@@ -300,7 +339,7 @@ class SelfDestructPacketView(discord.ui.View):
             self.completed = True
 
         await interaction.response.send_message(
-            f"💥 已参与 {self.sender.mention} 的自爆红包（{len(self.grabbers)}/10），等待开奖！",
+            f"💥 验证通过，已参与 {self.sender.mention} 的自爆红包（{len(self.grabbers)}/10），等待开奖！",
             ephemeral=True,
         )
 
