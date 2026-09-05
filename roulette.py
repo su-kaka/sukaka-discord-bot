@@ -83,6 +83,7 @@ BIG_RED_PACKET_POOL = 200  # 奖池 200 点
 BIG_RED_PACKET_MAX_GRABBERS = 10  # 最多 10 人参与
 BIG_RED_PACKET_MAX_SHARE = 100  # 单人最多抢到 100 点
 BIG_RED_PACKET_TIMEOUT_SECONDS = 300  # 5 分钟未满员也开奖
+BIG_RED_PACKET_OPTIONS_COUNT = 3  # 人机验证选项数（仅 1 个正确）
 
 
 async def _query_quota(client: httpx.AsyncClient, username: str) -> Optional[int]:
@@ -504,8 +505,35 @@ def _split_random_capped(pool: int, count: int, cap: int) -> list[int]:
     return amounts
 
 
+def _make_arithmetic_question() -> tuple[str, int, list[int]]:
+    """生成一道十以内加减法题，返回 (题目文本, 正确答案, 打乱后的选项列表)。"""
+    a = random.randint(0, 10)
+    b = random.randint(0, 10)
+    if random.random() < 0.5:
+        answer = a + b
+        question = f"{a} + {b} = ?"
+    else:
+        a, b = max(a, b), min(a, b)  # 保证结果非负
+        answer = a - b
+        question = f"{a} - {b} = ?"
+
+    # 生成不重复且非负的干扰项，凑满选项数
+    options = {answer}
+    while len(options) < BIG_RED_PACKET_OPTIONS_COUNT:
+        distractor = answer + random.randint(-5, 5)
+        if distractor >= 0:
+            options.add(distractor)
+    shuffled = list(options)
+    random.shuffle(shuffled)
+    return question, answer, shuffled
+
+
 class BigRedPacketView(discord.ui.View):
-    """机器人大红包：200 点奖池，最多 10 人抢，每人随机 0-100 点。"""
+    """机器人大红包：200 点奖池，最多 10 人抢，每人随机 0-100 点。
+
+    参与前需通过人机验证：答对一道十以内加减法（三个选项仅一个正确），
+    答错即失去本次参与资格。
+    """
 
     def __init__(self, client: httpx.AsyncClient) -> None:
         super().__init__(timeout=BIG_RED_PACKET_TIMEOUT_SECONDS)
@@ -513,6 +541,24 @@ class BigRedPacketView(discord.ui.View):
         self.message: Optional[discord.Message] = None
         self.completed = False
         self.grabbers: list[discord.Member | discord.User] = []
+        self.failed_users: set[int] = set()  # 答错失去资格的用户 ID
+        self.question, self.answer, options = _make_arithmetic_question()
+        for value in options:
+            self.add_item(self._make_option_button(value))
+
+    def _make_option_button(self, value: int) -> discord.ui.Button:
+        """创建一个答案选项按钮，callback 绑定对应的数值。"""
+        button = discord.ui.Button(
+            label=str(value),
+            style=discord.ButtonStyle.danger,
+            emoji="🧧",
+        )
+
+        async def _callback(interaction: discord.Interaction, option: int = value) -> None:
+            await self._answer(interaction, option)
+
+        button.callback = _callback
+        return button
 
     def _packet_text(self) -> str:
         names = "、".join(u.mention for u in self.grabbers) or "暂无"
@@ -520,13 +566,15 @@ class BigRedPacketView(discord.ui.View):
             f"🧧🧧 **机器人大红包**！奖池 **{BIG_RED_PACKET_POOL} 点**，"
             f"最多 {BIG_RED_PACKET_MAX_GRABBERS} 人参与（{len(self.grabbers)}/{BIG_RED_PACKET_MAX_GRABBERS}）\n"
             f"每人随机抢 0-{BIG_RED_PACKET_MAX_SHARE} 点，手快有手慢无！\n"
+            f"🧮 人机验证：**{self.question}**\n"
+            f"点击下方正确答案参与，答错将失去本次参与资格！\n"
             f"已参与：{names}\n"
             f"满 {BIG_RED_PACKET_MAX_GRABBERS} 人立即开奖，"
             f"{BIG_RED_PACKET_TIMEOUT_SECONDS} 秒未满按参与人数开奖。"
         )
 
-    @discord.ui.button(label="抢红包", style=discord.ButtonStyle.danger, emoji="🧧")
-    async def grab_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+    async def _answer(self, interaction: discord.Interaction, option: int) -> None:
+        """处理选项点击：答对参与，答错失去资格。"""
         user = interaction.user
         if user.bot:
             await interaction.response.send_message("机器人不能抢红包。", ephemeral=True)
@@ -534,8 +582,20 @@ class BigRedPacketView(discord.ui.View):
         if self.completed:
             await interaction.response.send_message("红包已开奖。", ephemeral=True)
             return
+        if user.id in self.failed_users:
+            await interaction.response.send_message(
+                "你已回答错误，失去本次参与资格。", ephemeral=True
+            )
+            return
         if any(u.id == user.id for u in self.grabbers):
             await interaction.response.send_message("你已经参与了。", ephemeral=True)
+            return
+
+        if option != self.answer:
+            self.failed_users.add(user.id)
+            await interaction.response.send_message(
+                "❌ 回答错误，已失去本次大红包参与资格！", ephemeral=True
+            )
             return
 
         # 原子加入：append 与满员判断之间不插入 await
@@ -545,7 +605,7 @@ class BigRedPacketView(discord.ui.View):
             self.completed = True
 
         await interaction.response.send_message(
-            f"🧧 已参与大红包（{len(self.grabbers)}/{BIG_RED_PACKET_MAX_GRABBERS}），等待开奖！",
+            f"🧧 验证通过，已参与大红包（{len(self.grabbers)}/{BIG_RED_PACKET_MAX_GRABBERS}），等待开奖！",
             ephemeral=True,
         )
 
@@ -1149,7 +1209,7 @@ def start_roulette(bot: "SukakaBot") -> None:
             await message.channel.send("\n".join(lines))
             return
 
-        # 陷阱：消耗 20 点设置 4 个陷阱，他人发言触发后随机扣 1-10 点给设置者
+        # 陷阱：消耗 10 点设置 4 个陷阱，他人发言触发后随机扣 1-10 点给设置者
         if content == TRAP_KEYWORD:
             now = time.monotonic()
             cooldown_until = trap_cooldowns.get(message.author.id, 0.0)
