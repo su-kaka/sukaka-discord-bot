@@ -26,7 +26,7 @@ DB_PATH = Path(os.getenv("GACHA_DB", GACHA_DB))
 
 # 卡牌定义：key -> (名称, 描述, 权重)
 CARD_POOL: dict[str, tuple[str, str, int]] = {
-    "heaven": ("一念天堂", "下次梭哈成功翻三倍", 10),
+    "heaven": ("一念天堂", "下次梭哈成功翻四倍", 10),
     "lucky": ("幸运儿", "下次抢红包必定最大", 10),
     "madman": ("狂徒", f"{GACHA_ROB_MAX_COUNT} 次内抢劫必定成功", 10),
     "weak": ("虚弱", f"{GACHA_ROB_MAX_COUNT} 次内被抢劫必定被抢成功", 10),

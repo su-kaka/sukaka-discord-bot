@@ -60,7 +60,7 @@ GACHA_COST = 10  # 抽卡消耗 10 点，全销毁
 GACHA_COOLDOWN_SECONDS = 10
 GACHA_BLANK_CHANCE = 0.5  # 空白卡概率 50%
 GACHA_DB = "gacha.db"
-GACHA_ROB_MAX_COUNT = 10  # 狂徒/虚弱生效次数
+GACHA_ROB_MAX_COUNT = 20  # 狂徒/虚弱生效次数
 GACHA_SEDUCE_SUCCESS_CHANCE = 0.5  # 诱惑成功概率
 SEDUCE_KEYWORD = "诱惑"
 
