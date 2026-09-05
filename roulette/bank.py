@@ -310,12 +310,14 @@ async def handle_deposit(message: discord.Message, client: httpx.AsyncClient) ->
     if has_loan(message.author.id):
         repaid, remaining_loan, lender_id = _repay_loan(message.author.id, amount)
         remaining_deposit = amount - repaid
+        # 还款进入借款人的银行账户
+        _add_balance(lender_id, repaid)
         lender_member = message.guild.get_member(lender_id) if message.guild else None
         lender_display = lender_member.mention if lender_member else f"用户 {lender_id}"
         if remaining_loan <= 0:
-            loan_note = f"\n💳 已还清贷款 **{repaid} 点** 给 {lender_display}！"
+            loan_note = f"\n💳 已还清贷款 **{repaid} 点** 给 {lender_display}（已存入其银行账户）！"
         else:
-            loan_note = f"\n💳 偿还贷款 **{repaid} 点** 给 {lender_display}，剩余欠款 **{remaining_loan} 点**。"
+            loan_note = f"\n💳 偿还贷款 **{repaid} 点** 给 {lender_display}（已存入其银行账户），剩余欠款 **{remaining_loan} 点**。"
 
     # 仇恨没收
     hatred_note = ""
