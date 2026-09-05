@@ -11,16 +11,11 @@ import httpx
 
 from roulette.api import adjust_quota, query_quota
 from roulette.bank import (
-    _get_balance,
     _set_balance,
     get_all_accounts_with_min_balance,
-    has_security_service,
-    has_royal_security_service,
     mark_heist_cooldown,
-    is_heist_cooldown,
     set_hatred,
     has_hatred,
-    clear_hatred,
 )
 from roulette.constants import (
     BANK_HEIST_BASE_SUCCESS,
@@ -230,7 +225,7 @@ class BankHeistView(discord.ui.View):
             _set_balance(discord_id, new_balance)
             mark_heist_cooldown(discord_id)
             total_loot += loot
-            target_details.append(f"目标存款 {balance} → 被抢 {loot} 点（{loot_percent}%）")
+            target_details.append(f"<@{discord_id}> 存款 {balance} → 被抢 {loot} 点（{loot_percent}%）")
 
         # 分配收益：70% 给队员，20% 销毁，10% 银行
         team_share = int(total_loot * BANK_HEIST_PROFIT_SHARE / 100)
@@ -259,6 +254,7 @@ class BankHeistView(discord.ui.View):
         result_text = (
             f"🏦💰 **抢银行成功！**\n"
             f"目标数：{len(targets)}，总收益：{total_loot} 点\n"
+            f"目标明细：\n" + "\n".join(target_details) + "\n"
             f"销毁 {destroy_share} 点，银行手续费 {bank_share} 点\n"
             f"队员分配：\n" + "\n".join(member_shares) + "\n"
             f"⚠️ 所有队员已被标记仇恨，下次存钱将被没收！"
@@ -272,7 +268,7 @@ class BankHeistView(discord.ui.View):
         roll: float,
     ) -> None:
         """失败结算。"""
-        target_text = "\n".join([f"目标存款 {balance} 点" for _, balance in targets])
+        target_text = "\n".join([f"<@{discord_id}> 存款 {balance} 点" for discord_id, balance in targets])
         await self.message.channel.send(
             f"🏦💥 **抢银行失败！**\n"
             f"团队成功率 {success_rate:.0f}%，判定值 {roll:.1f}\n"
