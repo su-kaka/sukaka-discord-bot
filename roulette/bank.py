@@ -255,10 +255,10 @@ async def handle_loan(message: discord.Message, client: httpx.AsyncClient) -> No
 
     lender_id, lender_balance = lender
 
-    # 从借款账号扣款
-    new_lender_balance = _deduct_balance(lender_id, BANK_LOAN_LENDER_GAIN)
+    # 从借款账号扣款（只扣本金 50 点）
+    new_lender_balance = _deduct_balance(lender_id, BANK_LOAN_AMOUNT)
     actual_deducted = lender_balance - new_lender_balance
-    if actual_deducted < BANK_LOAN_LENDER_GAIN:
+    if actual_deducted < BANK_LOAN_AMOUNT:
         await message.channel.send("🏦 贷款失败：借款账号余额不足。")
         return
 
@@ -279,7 +279,7 @@ async def handle_loan(message: discord.Message, client: httpx.AsyncClient) -> No
     await message.channel.send(
         f"🏦 {message.author.mention} 成功贷款 **{BANK_LOAN_AMOUNT} 点**！\n"
         f"借款账号：{lender_display}（被扣除 **{actual_deducted} 点** 存款）\n"
-        f"需还款 **{BANK_LOAN_REPAY} 点**（其中 {BANK_LOAN_LENDER_GAIN} 点归借款账号，{BANK_LOAN_FEE} 点手续费销毁）。\n"
+        f"需还款 **{BANK_LOAN_REPAY} 点**（其中 {BANK_LOAN_LENDER_GAIN} 点归借款账号：50 本金 + 5 利息，{BANK_LOAN_FEE} 点手续费销毁）。\n"
         f"💡 发送「存钱」将优先偿还贷款。"
     )
 
