@@ -33,8 +33,7 @@ from roulette.constants import (
     BANK_WITHDRAW_KEYWORD,
     BANKER_KEYWORD,
     BANKER_MIN_QUOTA,
-    BET_AMOUNT,
-    COOLDOWN_SECONDS,
+    BANKER_RUN_KEYWORD,
     CURSE_KEYWORD,
     DUEL_COOLDOWN_SECONDS,
     DUEL_FEE_PERCENT,
@@ -216,7 +215,7 @@ def start_roulette(bot: "SukakaBot") -> None:
         if content == RULES_KEYWORD:
             rules = (
                 "📜 **游戏区规则**\n\n"
-                "🎲 **赌大小**：与庄家对赌，各押 5 点 roll 点，赢家得 9 点（1 点销毁）。发送「当庄家」可成为庄家，庄家破产自动切换为机器人庄家。\n"
+                "🎲 **赌大小**：与庄家对赌，各押 5 点 roll 点，赢家得 9 点（1 点销毁）。发送「当庄家」可成为庄家（需 ≥ 50 点），庄家破产自动切换为机器人庄家，庄家可发送「跑路」取消当庄家。\n"
                 "🙏 **乞讨**：发起乞讨，别人施舍你 5 点（施舍者扣 7 点）。\n"
                 "⚔️ **决斗**：双方押上额度最少者的全部额度，赢家获得 80%（20% 销毁），需 ≥ 10 点。\n"
                 "🧧 **红包**：押额度的 10%（最少 10 点），80% 分给最多 3 个幸运儿（20% 销毁）。\n"
@@ -225,7 +224,7 @@ def start_roulette(bot: "SukakaBot") -> None:
                 "🔮 **诅咒**：押 10 点，被诅咒者下次抢劫必被反杀、决斗必输。\n"
                 "🎰 **梭哈**：押全部额度，50% 翻倍（一念天堂翻四倍），成功后扣 20% 手续费，失败清零。\n"
                 "🎴 **抽卡**：押额度的 10%（最少 10 点），50% 空白，其余获得魔法卡。\n"
-                "🏦 **地精银行**：存钱押 50%（最低 10 点），取钱随机扣 50%-100% 手续费。\n"
+                "🏦 **地精银行**：发送「存钱」押 50%（最低 10 点），发送「取钱」随机扣 50%-100% 手续费。\n"
                 "💥 **自爆**：额度归零，随机销毁 25%-50%，剩余生成红包。\n"
                 "🧧🧧 **大红包**：机器人每 6 分钟发 200 点，最多 10 人抢，每人 0-100 点。\n"
                 "🏆 **排行榜**：展示活动额度前十用户。"
@@ -369,6 +368,23 @@ def start_roulette(bot: "SukakaBot") -> None:
             await message.channel.send(
                 f"🎲 {message.author.mention} 已成为当前庄家！\n"
                 f"其他玩家发送「赌大小」即可与庄家对赌。"
+            )
+            return
+
+        # 跑路：取消当庄家
+        if content == BANKER_RUN_KEYWORD:
+            if current_banker["banker"] is None:
+                await message.channel.send("🎲 当前没有庄家。")
+                return
+            if current_banker["banker"].id != message.author.id:
+                await message.channel.send(
+                    f"🎲 只有当前庄家 {current_banker['banker'].mention} 才能跑路。"
+                )
+                return
+            current_banker["banker"] = None
+            await message.channel.send(
+                f"🎲 {message.author.mention} 已跑路，庄家位置空缺！\n"
+                f"发送「当庄家」可成为新庄家。"
             )
             return
 
