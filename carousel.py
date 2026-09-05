@@ -7,7 +7,7 @@ import discord
 
 CAROUSEL_CHANNEL_ID = 1455038454772531311
 CAROUSEL_FILE = Path(os.getenv("CAROUSEL_FILE", "carousel.txt"))
-DEFAULT_CAROUSEL_INTERVAL_MINUTES = 5
+DEFAULT_CAROUSEL_INTERVAL_MINUTES = 1
 
 
 def carousel_interval_minutes() -> float:
@@ -64,7 +64,8 @@ async def carousel_loop(client: discord.Client) -> None:
                     channel = await client.fetch_channel(CAROUSEL_CHANNEL_ID)
                 if not isinstance(channel, (discord.TextChannel, discord.Thread)):
                     raise ValueError("目标频道不是文字频道或帖子")
-                await channel.send(content)
+                # 消息在下一个轮播周期到来时自动删除
+                await channel.send(content, delete_after=interval_minutes * 60)
                 print(f"Carousel message sent to channel {CAROUSEL_CHANNEL_ID}")
         except FileNotFoundError:
             print(f"Carousel file not found: {CAROUSEL_FILE}")

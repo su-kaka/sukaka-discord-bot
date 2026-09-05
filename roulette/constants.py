@@ -78,11 +78,27 @@ BANK_WITHDRAW_KEYWORD = "取钱"
 BANK_BALANCE_KEYWORD = "我的钱"
 BANK_MIN_DEPOSIT = 10  # 最低起存金额
 BANK_DEPOSIT_PERCENT = 50  # 存入额度比例（%）
-BANK_WITHDRAW_MIN_PERCENT = 50  # 取钱扣除比例下限（%）
-BANK_WITHDRAW_MAX_PERCENT = 100  # 取钱扣除比例上限（%）
+BANK_WITHDRAW_MIN_PERCENT = 1  # 取钱扣除比例下限（%）
+BANK_WITHDRAW_MAX_PERCENT = 50  # 取钱扣除比例上限（%）
 BANK_DB = "bank.db"
 BANK_SECURITY_THRESHOLD = 1000  # 存款超过此值解锁普通安保：无法被抢劫
 BANK_ROYAL_SECURITY_THRESHOLD = 2000  # 存款超过此值解锁皇家安保：无法被抢劫、诱惑、劫富济贫
+
+BANK_HEIST_KEYWORD = "抢银行"
+BANK_HEIST_TEAM_SIZE = 3  # 组队人数
+BANK_HEIST_JOIN_TIMEOUT_SECONDS = 60  # 组队 timeout
+BANK_HEIST_COOLDOWN_SECONDS = 300  # 个人冷却
+BANK_HEIST_TARGET_COOLDOWN_SECONDS = 600  # 目标被抢冷却
+BANK_HEIST_MIN_BALANCE = 100  # 目标最低存款
+BANK_HEIST_MIN_TARGETS = 1  # 最少目标数
+BANK_HEIST_MAX_TARGETS = 3  # 最多目标数
+BANK_HEIST_BASE_SUCCESS = 5  # 基础成功率（%）
+BANK_HEIST_PROFIT_SHARE = 70  # 队员分配比例（%）
+BANK_HEIST_GEAR_NAMES = {"knife": "跑刀", "gun": "起枪", "armor": "全甲"}
+BANK_HEIST_GEAR_COST_PERCENT = {"knife": 10, "gun": 50, "armor": 100}  # 装备投入比例（%）
+BANK_HEIST_GEAR_MIN_QUOTA = {"knife": 10, "gun": 50, "armor": 100}  # 装备最低额度
+BANK_HEIST_GEAR_COEFFICIENTS = {"knife": 1, "gun": 5, "armor": 10}  # 收益系数
+BANK_HEIST_GEAR_SUCCESS_BONUS = {"knife": 5, "gun": 15, "armor": 30}  # 成功率加成（%）
 
 RULES_KEYWORD = "规则"
 
