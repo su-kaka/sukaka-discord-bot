@@ -17,6 +17,7 @@ from roulette.constants import (
     BIG_RED_PACKET_TIMEOUT_SECONDS,
     QUOTA_CHANNEL_ID,
 )
+from roulette.gacha import consume_effect
 from roulette.utils import make_arithmetic_question, split_random_capped
 
 if TYPE_CHECKING:
@@ -127,6 +128,16 @@ class BigRedPacketView(discord.ui.View):
             BIG_RED_PACKET_POOL, len(self.grabbers), BIG_RED_PACKET_MAX_SHARE
         )
 
+        # 幸运儿生效：下次抢大红包必定最大
+        lucky_note = ""
+        for user in self.grabbers:
+            if consume_effect(user.id, "lucky"):
+                max_idx = shares.index(max(shares))
+                user_idx = self.grabbers.index(user)
+                shares[user_idx], shares[max_idx] = shares[max_idx], shares[user_idx]
+                lucky_note = f"\n🃏 幸运儿生效！{user.mention} 必定抢到最大份！"
+                break
+
         # 并发发放额度，避免串行等待
         async def _grant(user: discord.Member | discord.User, amount: int) -> Optional[int]:
             if amount > 0:
@@ -144,7 +155,7 @@ class BigRedPacketView(discord.ui.View):
         total_granted = sum(amount for _, amount, _ in results)
         lines = [
             f"🧧🧧 **机器人大红包开奖！**（{len(self.grabbers)} 人参与，"
-            f"共发出 {total_granted}/{BIG_RED_PACKET_POOL} 点）"
+            f"共发出 {total_granted}/{BIG_RED_PACKET_POOL} 点）{lucky_note}"
         ]
         for user, amount, new_quota in sorted(results, key=lambda r: r[1], reverse=True):
             if amount == 0:

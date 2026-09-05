@@ -16,7 +16,6 @@ from roulette.constants import (
     RED_PACKET_POOL,
     RED_PACKET_TIMEOUT_SECONDS,
 )
-from roulette.gacha import consume_effect
 from roulette.utils import split_random
 
 
@@ -91,19 +90,6 @@ class RedPacketView(discord.ui.View):
         winners = random.sample(self.grabbers, winner_count)
         shares = split_random(RED_PACKET_POOL, winner_count)
 
-        # 幸运儿生效：下次抢红包必定最大
-        lucky_note = ""
-        for user in self.grabbers:
-            if consume_effect(user.id, "lucky"):
-                max_idx = shares.index(max(shares))
-                if user in winners:
-                    user_idx = winners.index(user)
-                    winners[user_idx], winners[max_idx] = winners[max_idx], winners[user_idx]
-                else:
-                    winners[max_idx] = user
-                lucky_note = f"\n🃏 幸运儿生效！{user.mention} 必定抢到最大份！"
-                break
-
         results: list[tuple[discord.Member | discord.User, int, Optional[int]]] = []
         for user, amount in zip(winners, shares):
             new_quota = await adjust_quota(self.client, "grant", user.name, amount)
@@ -115,7 +101,6 @@ class RedPacketView(discord.ui.View):
         lines = [
             f"🧧 {self.sender.mention} 的红包开奖！"
             f"（{len(self.grabbers)} 人参与，{winner_count} 人中奖，奖池 {RED_PACKET_POOL} 点）"
-            f"{lucky_note}"
         ]
         for user, amount, new_quota in sorted(results, key=lambda r: r[1], reverse=True):
             if amount == 0:
