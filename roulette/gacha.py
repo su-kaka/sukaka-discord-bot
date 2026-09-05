@@ -110,6 +110,30 @@ def has_effect(discord_id: int, card_key: str) -> bool:
     return get_effect_remaining(discord_id, card_key) > 0
 
 
+def get_user_cards(discord_id: int) -> list[tuple[str, int]]:
+    """查询用户持有的持续型卡牌，返回 (card_key, remaining) 列表。"""
+    with sqlite3.connect(DB_PATH) as conn:
+        rows = conn.execute(
+            "SELECT card_key, remaining FROM gacha_effects WHERE discord_id = ? AND remaining > 0",
+            (discord_id,),
+        ).fetchall()
+    return rows
+
+
+async def handle_my_cards(message: discord.Message) -> None:
+    """处理「我的卡牌」命令：查看持有的持续型卡牌。"""
+    cards = get_user_cards(message.author.id)
+    if not cards:
+        await message.channel.send("🎴 你目前没有生效中的卡牌。")
+        return
+
+    lines = [f"🎴 {message.author.mention} 的卡牌："]
+    for card_key, remaining in cards:
+        name, desc, _ = CARD_POOL.get(card_key, (card_key, "未知效果", 0))
+        lines.append(f"• **{name}** ×{remaining} — {desc}")
+    await message.channel.send("\n".join(lines))
+
+
 async def handle_gacha(
     message: discord.Message,
     client: httpx.AsyncClient,

@@ -38,6 +38,7 @@ from roulette.constants import (
     GACHA_KEYWORD,
     LEADERBOARD_KEYWORD,
     MARRY_COOLDOWN_SECONDS,
+    MY_CARDS_KEYWORD,
     MARRY_FEE,
     MARRY_KEYWORD,
     MARRY_TIMEOUT_SECONDS,
@@ -53,7 +54,7 @@ from roulette.constants import (
 from roulette.curse import handle_curse
 from roulette.dice_game import DiceGame
 from roulette.duel import DuelView
-from roulette.gacha import consume_effect, handle_gacha, handle_seduce
+from roulette.gacha import consume_effect, handle_gacha, handle_my_cards, handle_seduce
 from roulette.leaderboard import handle_leaderboard
 from roulette.marry import MarryView
 from roulette.red_packet import RedPacketView
@@ -176,6 +177,11 @@ def start_roulette(bot: "SukakaBot") -> None:
         # 抽卡：10 点抽一张魔法卡
         if content == GACHA_KEYWORD:
             await handle_gacha(message, client, gacha_cooldowns)
+            return
+
+        # 我的卡牌：查看持有的持续型卡牌
+        if content == MY_CARDS_KEYWORD:
+            await handle_my_cards(message)
             return
 
         # 诱惑：使用诱惑卡强制结婚
