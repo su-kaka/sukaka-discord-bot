@@ -19,7 +19,6 @@ from roulette.constants import (
     GACHA_COST_PERCENT,
     GACHA_DB,
     GACHA_MIN_COST,
-    GACHA_ROB_MAX_COUNT,
     GACHA_SEDUCE_SUCCESS_CHANCE,
     GACHA_SELFDESTRUCT_MAX_PERCENT,
     GACHA_SELFDESTRUCT_MIN_PERCENT,
@@ -35,8 +34,8 @@ DB_PATH = Path(os.getenv("GACHA_DB", GACHA_DB))
 CARD_POOL: dict[str, tuple[str, str, int]] = {
     "heaven": ("一念天堂", "下次梭哈成功概率提升到 75%，成功翻四倍", 10),
     "lucky": ("幸运儿", "下次抢红包必定最大", 10),
-    "madman": ("狂徒", f"{GACHA_ROB_MAX_COUNT} 次内抢劫必定成功，抢劫 CD 缩短到 10 秒", 10),
-    "weak": ("虚弱", f"{GACHA_ROB_MAX_COUNT} 次内被抢劫必定被抢成功", 10),
+    "madman": ("狂徒", "下次抢劫必定成功，抢劫 CD 缩短到 10 秒", 10),
+    "weak": ("虚弱", "下次被抢劫必定被抢成功", 10),
     "seduce": ("诱惑", "强制和某人结婚（50% 概率失败）", 10),
     "robinhood": ("劫富济贫", "排名前十的用户随机分你 1-10 点", 10),
     "multidraw": ("十连抽", "下次抽卡自动抽十次", 10),
@@ -198,9 +197,8 @@ async def handle_gacha(
         await _settle_selfdestruct(message, client)
         return
 
-    # 狂徒/虚弱存 10 次，其余存 1 次
-    remaining = GACHA_ROB_MAX_COUNT if card_key in ("madman", "weak") else 1
-    _add_effect(message.author.id, card_key, remaining)
+    # 所有卡牌均只生效 1 次
+    _add_effect(message.author.id, card_key, 1)
     await message.channel.send(
         f"🎴 {message.author.mention} 消耗 {cost} 点抽卡……\n"
         f"✨ **{name}**！{desc}。"
@@ -223,8 +221,7 @@ async def _handle_multidraw(message: discord.Message, client: httpx.AsyncClient,
             await _settle_robinhood(message, client)
             continue
 
-        remaining = GACHA_ROB_MAX_COUNT if card_key in ("madman", "weak") else 1
-        _add_effect(message.author.id, card_key, remaining)
+        _add_effect(message.author.id, card_key, 1)
         lines.append(f"{i+1}. ✨ **{name}**！{desc}")
 
     await message.channel.send("\n".join(lines))

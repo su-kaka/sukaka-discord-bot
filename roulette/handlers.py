@@ -30,10 +30,10 @@ from roulette.constants import (
     BIG_RED_PACKET_POOL,
     COOLDOWN_SECONDS,
     CURSE_KEYWORD,
-    DUEL_BET,
     DUEL_COOLDOWN_SECONDS,
+    DUEL_FEE_PERCENT,
     DUEL_KEYWORD,
-    DUEL_PRIZE,
+    DUEL_MIN_QUOTA,
     DUEL_TIMEOUT_SECONDS,
     GACHA_KEYWORD,
     LEADERBOARD_KEYWORD,
@@ -139,7 +139,10 @@ def start_roulette(bot: "SukakaBot") -> None:
         # 决斗：决斗 @某人
         if content.startswith(DUEL_KEYWORD):
             if not message.mentions:
-                await message.channel.send("⚔️ 用法：`决斗 @某人`，双方各押 6 点，赢家得 10 点。")
+                await message.channel.send(
+                    f"⚔️ 用法：`决斗 @某人`，双方押上额度最少者的全部额度，"
+                    f"赢家获得 80%（{DUEL_FEE_PERCENT}% 手续费销毁），双方均需 ≥ {DUEL_MIN_QUOTA} 点。"
+                )
                 return
             opponent = message.mentions[0]
             if opponent.id == message.author.id:
@@ -161,7 +164,7 @@ def start_roulette(bot: "SukakaBot") -> None:
             view = DuelView(message.author, opponent, client, on_finish=_duel_cooldown, cursed_users=cursed_users)
             view.message = await message.channel.send(
                 f"⚔️ {message.author.mention} 向 {opponent.mention} 发起决斗！\n"
-                f"双方各押 {DUEL_BET} 点，roll 点定胜负，赢家得 {DUEL_PRIZE} 点（2 点销毁）。\n"
+                f"双方押上额度最少者的全部额度，赢家获得 80%（{DUEL_FEE_PERCENT}% 手续费销毁）。\n"
                 f"{opponent.mention} 请在 {DUEL_TIMEOUT_SECONDS} 秒内接受或拒绝。",
                 view=view,
             )
