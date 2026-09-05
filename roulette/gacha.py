@@ -20,9 +20,13 @@ from roulette.constants import (
     GACHA_DB,
     GACHA_ROB_MAX_COUNT,
     GACHA_SEDUCE_SUCCESS_CHANCE,
-    MARRY_FEE,
+    GACHA_SELFDESTRUCT_MAX_PERCENT,
+    GACHA_SELFDESTRUCT_MIN_PERCENT,
+    MARRY_FEE_PERCENT,
+    MARRY_MIN_FEE,
 )
-from roulette.utils import make_arithmetic_question, split_random
+from roulette.packet_base import PacketView
+from roulette.utils import split_random
 
 DB_PATH = Path(os.getenv("GACHA_DB", GACHA_DB))
 
@@ -35,7 +39,7 @@ CARD_POOL: dict[str, tuple[str, str, int]] = {
     "seduce": ("诱惑", "强制和某人结婚（50% 概率失败）", 10),
     "robinhood": ("劫富济贫", "排名前十的用户随机分你 1-10 点", 10),
     "multidraw": ("十连抽", "下次抽卡自动抽十次", 10),
-    "selfdestruct": ("自爆", "额度归零，生成对应额度的红包供所有人抢", 10),
+    "selfdestruct": ("自爆", f"额度归零，随机销毁 {GACHA_SELFDESTRUCT_MIN_PERCENT}%-{GACHA_SELFDESTRUCT_MAX_PERCENT}%，剩余生成红包供所有人抢", 10),
     "blank": ("空白", "无效果", 40),  # 实际概率由 GACHA_BLANK_CHANCE 控制
 }
 
@@ -255,12 +259,8 @@ async def _settle_robinhood(message: discord.Message, client: httpx.AsyncClient)
     await message.channel.send("\n".join(lines))
 
 
-class SelfDestructPacketView(discord.ui.View):
-    """自爆红包：自爆者额度归零，奖池随机分给抢红包的人。
-
-    参与前需通过人机验证：答对一道十以内加减法（三个选项仅一个正确），
-    答错即失去本次参与资格。
-    """
+class SelfDestructPacketView(PacketView):
+    """自爆红包：自爆者额度归零，奖池随机分给抢红包的人。"""
 
     def __init__(
         self,
@@ -268,126 +268,19 @@ class SelfDestructPacketView(discord.ui.View):
         pool: int,
         client: httpx.AsyncClient,
     ) -> None:
-        super().__init__(timeout=60)
-        self.sender = sender
-        self.pool = pool
-        self.client = client
-        self.message: Optional[discord.Message] = None
-        self.completed = False
-        self.grabbers: list[discord.Member | discord.User] = []
-        self.failed_users: set[int] = set()  # 答错失去资格的用户 ID
-        self.question, self.answer, options = make_arithmetic_question()
-        for value in options:
-            self.add_item(self._make_option_button(value))
-
-    def _make_option_button(self, value: int) -> discord.ui.Button:
-        """创建一个答案选项按钮，callback 绑定对应的数值。"""
-        button = discord.ui.Button(
-            label=str(value),
-            style=discord.ButtonStyle.danger,
-            emoji="💥",
+        super().__init__(
+            sender=sender,
+            client=client,
+            pool=pool,
+            max_grabbers=10,
+            timeout=60,
+            packet_type="selfdestruct",
+            split_mode="all",
         )
-
-        async def _callback(interaction: discord.Interaction, option: int = value) -> None:
-            await self._answer(interaction, option)
-
-        button.callback = _callback
-        return button
-
-    def _packet_text(self) -> str:
-        names = "、".join(u.mention for u in self.grabbers) or "暂无"
-        return (
-            f"💥 {self.sender.mention} 自爆了一个红包！（{len(self.grabbers)}/10）\n"
-            f"奖池 **{self.pool} 点** 随机分给抢红包的人，手快有手慢无！\n"
-            f"🧮 人机验证：**{self.question}**\n"
-            f"点击下方正确答案参与，答错将失去本次参与资格！\n"
-            f"已参与：{names}\n"
-            f"满 10 人立即开奖，60 秒未满按参与人数开奖。"
-        )
-
-    async def _answer(self, interaction: discord.Interaction, option: int) -> None:
-        """处理选项点击：答对参与，答错失去资格。"""
-        user = interaction.user
-        if user.bot:
-            await interaction.response.send_message("机器人不能抢红包。", ephemeral=True)
-            return
-        if user.id == self.sender.id:
-            await interaction.response.send_message("不能抢自己的自爆红包。", ephemeral=True)
-            return
-        if self.completed:
-            await interaction.response.send_message("红包已开奖。", ephemeral=True)
-            return
-        if user.id in self.failed_users:
-            await interaction.response.send_message(
-                "你已回答错误，失去本次参与资格。", ephemeral=True
-            )
-            return
-        if any(u.id == user.id for u in self.grabbers):
-            await interaction.response.send_message("你已经参与了。", ephemeral=True)
-            return
-
-        if option != self.answer:
-            self.failed_users.add(user.id)
-            await interaction.response.send_message(
-                "❌ 回答错误，已失去本次自爆红包参与资格！", ephemeral=True
-            )
-            return
-
-        self.grabbers.append(user)
-        is_full = len(self.grabbers) >= 10
-
-        await interaction.response.send_message(
-            f"💥 验证通过，已参与 {self.sender.mention} 的自爆红包（{len(self.grabbers)}/10），等待开奖！",
-            ephemeral=True,
-        )
-
-        if is_full:
-            await self._settle()
-        elif self.message:
-            await self.message.edit(content=self._packet_text(), view=self)
-
-    async def _settle(self) -> None:
-        """开奖：奖池随机分给参与者。"""
-        if self.completed:
-            return
-        self.completed = True
-        self.stop()
-        for item in self.children:
-            item.disabled = True  # type: ignore[union-attr]
-
-        count = len(self.grabbers)
-        if count == 0:
-            if self.message:
-                await self.message.edit(content="💥 自爆红包无人参与，已过期。", view=None)
-            return
-
-        shares = split_random(self.pool, count)
-        results: list[tuple[discord.Member | discord.User, int, Optional[int]]] = []
-        for user, amount in zip(self.grabbers, shares):
-            new_quota = await adjust_quota(self.client, "grant", user.name, amount)
-            results.append((user, amount, new_quota))
-
-        lines = [
-            f"💥 {self.sender.mention} 的自爆红包开奖！"
-            f"（{count} 人参与，奖池 {self.pool} 点）"
-        ]
-        for user, amount, new_quota in sorted(results, key=lambda r: r[1], reverse=True):
-            if new_quota is None:
-                lines.append(f"💥 {user.mention} 抢到 **{amount} 点**（发放失败，请联系管理员）")
-            else:
-                lines.append(f"💥 {user.mention} 抢到 **{amount} 点**（当前 {new_quota} 点）")
-
-        if self.message:
-            await self.message.edit(content="\n".join(lines), view=None)
-
-    async def on_timeout(self) -> None:
-        if self.completed:
-            return
-        await self._settle()
 
 
 async def _settle_selfdestruct(message: discord.Message, client: httpx.AsyncClient) -> None:
-    """自爆：额度归零，生成对应额度的红包。"""
+    """自爆：额度归零，随机销毁 25%-50%，剩余生成红包。"""
     quota = await query_quota(client, message.author.name)
     if quota is None:
         await message.channel.send("💥 查询额度失败，请稍后再试。")
@@ -402,12 +295,20 @@ async def _settle_selfdestruct(message: discord.Message, client: httpx.AsyncClie
         await message.channel.send("💥 扣除额度失败，请稍后再试。")
         return
 
+    destroy_percent = random.randint(GACHA_SELFDESTRUCT_MIN_PERCENT, GACHA_SELFDESTRUCT_MAX_PERCENT)
+    destroyed = int(quota * destroy_percent / 100)
+    pool = quota - destroyed
+
     await message.channel.send(
-        f"💥 {message.author.mention} 抽中 **自爆**！额度 **{quota} 点** 已归零！"
+        f"💥 {message.author.mention} 抽中 **自爆**！额度 **{quota} 点** 已归零！\n"
+        f"销毁 **{destroyed} 点**（{destroy_percent}%），剩余 **{pool} 点** 生成红包！"
     )
 
+    if pool <= 0:
+        return
+
     # 生成自爆红包
-    view = SelfDestructPacketView(message.author, quota, client)
+    view = SelfDestructPacketView(message.author, pool, client)
     view.message = await message.channel.send(view._packet_text(), view=view)
 
 
@@ -446,9 +347,10 @@ async def handle_seduce(
         return
 
     total = p_quota + q_quota
-    if total < MARRY_FEE:
+    fee = max(MARRY_MIN_FEE, int(total * MARRY_FEE_PERCENT / 100))
+    if total < fee:
         await message.channel.send(
-            f"💘 两人总额度仅 {total} 点，不足以支付 {MARRY_FEE} 点手续费，婚礼取消。"
+            f"💘 两人总额度仅 {total} 点，不足以支付 {fee} 点手续费（总额度的 {MARRY_FEE_PERCENT}%，最低 {MARRY_MIN_FEE} 点），婚礼取消。"
         )
         return
 
@@ -459,8 +361,8 @@ async def handle_seduce(
                 await message.channel.send("💘 结算失败，请稍后再试。")
                 return
 
-    share = (total - MARRY_FEE) // 2
-    bonus = (total - MARRY_FEE) % 2
+    share = (total - fee) // 2
+    bonus = (total - fee) % 2
     p_share = share + bonus
     q_share = share
 
@@ -469,7 +371,7 @@ async def handle_seduce(
 
     await message.channel.send(
         f"💘 {message.author.mention} 对 {partner.mention} 使用诱惑……\n"
-        f"💍 **强制结婚成功！** 两人额度合并共 {total} 点，手续费 {MARRY_FEE} 点已销毁。\n"
+        f"💍 **强制结婚成功！** 两人额度合并共 {total} 点，手续费 {fee} 点已销毁。\n"
         f"{message.author.mention} 分得 **{p_share} 点**（当前 {p_new if p_new is not None else '?'} 点）\n"
         f"{partner.mention} 分得 **{q_share} 点**（当前 {q_new if q_new is not None else '?'} 点）"
     )

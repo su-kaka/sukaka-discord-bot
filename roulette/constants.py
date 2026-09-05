@@ -41,7 +41,8 @@ ROB_MIN_PERCENT = 10  # 百分比伤害下限（%）
 ROB_MAX_PERCENT = 30  # 百分比伤害上限（%）
 
 MARRY_KEYWORD = "结婚"
-MARRY_FEE = 10  # 手续费销毁
+MARRY_MIN_FEE = 10  # 手续费最低 10 点
+MARRY_FEE_PERCENT = 10  # 手续费为两人总额度的百分比
 MARRY_TIMEOUT_SECONDS = 60
 MARRY_COOLDOWN_SECONDS = 300
 
@@ -64,6 +65,8 @@ GACHA_BLANK_CHANCE = 0.5  # 空白卡概率 50%
 GACHA_DB = "gacha.db"
 GACHA_ROB_MAX_COUNT = 20  # 狂徒/虚弱生效次数
 GACHA_SEDUCE_SUCCESS_CHANCE = 0.5  # 诱惑成功概率
+GACHA_SELFDESTRUCT_MIN_PERCENT = 25  # 自爆销毁比例下限（%）
+GACHA_SELFDESTRUCT_MAX_PERCENT = 50  # 自爆销毁比例上限（%）
 SEDUCE_KEYWORD = "诱惑"
 MY_CARDS_KEYWORD = "我的卡牌"
 

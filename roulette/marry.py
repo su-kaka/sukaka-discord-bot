@@ -8,7 +8,7 @@ import discord
 import httpx
 
 from roulette.api import adjust_quota, query_quota
-from roulette.constants import MARRY_FEE, MARRY_TIMEOUT_SECONDS
+from roulette.constants import MARRY_FEE_PERCENT, MARRY_MIN_FEE, MARRY_TIMEOUT_SECONDS
 
 
 class MarryView(discord.ui.View):
@@ -54,9 +54,10 @@ class MarryView(discord.ui.View):
             return
 
         total = p_quota + q_quota
-        if total < MARRY_FEE:
+        fee = max(MARRY_MIN_FEE, int(total * MARRY_FEE_PERCENT / 100))
+        if total < fee:
             await interaction.response.send_message(
-                f"两人总额度仅 {total} 点，不足以支付 {MARRY_FEE} 点手续费，婚礼取消。",
+                f"两人总额度仅 {total} 点，不足以支付 {fee} 点手续费（总额度的 {MARRY_FEE_PERCENT}%，最低 {MARRY_MIN_FEE} 点），婚礼取消。",
                 ephemeral=True,
             )
             return
@@ -73,8 +74,8 @@ class MarryView(discord.ui.View):
                     await interaction.response.send_message("结算失败，请稍后再试。", ephemeral=True)
                     return
 
-        share = (total - MARRY_FEE) // 2
-        bonus = (total - MARRY_FEE) % 2  # 奇数时多出 1 点给求婚者
+        share = (total - fee) // 2
+        bonus = (total - fee) % 2  # 奇数时多出 1 点给求婚者
         p_share = share + bonus
         q_share = share
 
@@ -88,7 +89,7 @@ class MarryView(discord.ui.View):
 
         result_text = (
             f"💍 **婚礼完成！** {self.proposer.mention} 和 {self.partner.mention} 结为夫妻！\n"
-            f"两人额度合并共 {total} 点，手续费 {MARRY_FEE} 点已销毁，剩余 {total - MARRY_FEE} 点平分。\n"
+            f"两人额度合并共 {total} 点，手续费 {fee} 点已销毁，剩余 {total - fee} 点平分。\n"
             f"{self.proposer.mention} 分得 **{p_share} 点**（当前 {p_new if p_new is not None else '?'} 点）\n"
             f"{self.partner.mention} 分得 **{q_share} 点**（当前 {q_new if q_new is not None else '?'} 点）"
         )

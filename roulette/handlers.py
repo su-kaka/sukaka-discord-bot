@@ -39,8 +39,9 @@ from roulette.constants import (
     LEADERBOARD_KEYWORD,
     MARRY_COOLDOWN_SECONDS,
     MY_CARDS_KEYWORD,
-    MARRY_FEE,
+    MARRY_FEE_PERCENT,
     MARRY_KEYWORD,
+    MARRY_MIN_FEE,
     MARRY_TIMEOUT_SECONDS,
     PLAYER_COUNT,
     QUOTA_CHANNEL_ID,
@@ -101,7 +102,7 @@ def start_roulette(bot: "SukakaBot") -> None:
             if not message.mentions:
                 await message.channel.send(
                     f"💍 用法：`结婚 @某人`，对方同意后两人额度合并，"
-                    f"扣 {MARRY_FEE} 点手续费，剩余平分。"
+                    f"扣总额度 {MARRY_FEE_PERCENT}% 手续费（最低 {MARRY_MIN_FEE} 点），剩余平分。"
                 )
                 return
             partner = message.mentions[0]
@@ -124,7 +125,7 @@ def start_roulette(bot: "SukakaBot") -> None:
             view = MarryView(message.author, partner, client, on_finish=_marry_cooldown)
             view.message = await message.channel.send(
                 f"💍 {message.author.mention} 向 {partner.mention} 求婚！\n"
-                f"同意后两人额度合并，扣 {MARRY_FEE} 点手续费，剩余平分。\n"
+                f"同意后两人额度合并，扣总额度 {MARRY_FEE_PERCENT}% 手续费（最低 {MARRY_MIN_FEE} 点），剩余平分。\n"
                 f"{partner.mention} 请在 {MARRY_TIMEOUT_SECONDS} 秒内回应。",
                 view=view,
             )
