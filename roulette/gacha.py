@@ -350,7 +350,10 @@ class SelfDestructPacketView(discord.ui.View):
 
     async def _settle(self) -> None:
         """开奖：奖池随机分给参与者。"""
+        if self.completed:
+            return
         self.completed = True
+        self.stop()
         for item in self.children:
             item.disabled = True  # type: ignore[union-attr]
 

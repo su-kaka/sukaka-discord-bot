@@ -82,7 +82,10 @@ class RedPacketView(discord.ui.View):
 
     async def _settle(self) -> None:
         """开奖：随机选出最多 3 个幸运儿分奖池，其余人 0 点。"""
+        if self.completed:
+            return
         self.completed = True
+        self.stop()
         self._finish()
         for item in self.children:
             item.disabled = True  # type: ignore[union-attr]
