@@ -16,8 +16,9 @@ from roulette.api import adjust_quota, query_quota, query_top_quota
 from roulette.constants import (
     GACHA_BLANK_CHANCE,
     GACHA_COOLDOWN_SECONDS,
-    GACHA_COST,
+    GACHA_COST_PERCENT,
     GACHA_DB,
+    GACHA_MIN_COST,
     GACHA_ROB_MAX_COUNT,
     GACHA_SEDUCE_SUCCESS_CHANCE,
     GACHA_SELFDESTRUCT_MAX_PERCENT,
@@ -158,13 +159,14 @@ async def handle_gacha(
     if quota is None:
         await message.channel.send("🎴 查询额度失败，请稍后再试。")
         return
-    if quota < GACHA_COST:
+    cost = max(GACHA_MIN_COST, int(quota * GACHA_COST_PERCENT / 100))
+    if quota < cost:
         await message.channel.send(
-            f"🎴 额度不足：当前 {quota} 点，抽卡需要 {GACHA_COST} 点。"
+            f"🎴 额度不足：当前 {quota} 点，抽卡需要 {cost} 点（额度的 {GACHA_COST_PERCENT}%，最低 {GACHA_MIN_COST} 点）。"
         )
         return
 
-    result = await adjust_quota(client, "deduct", message.author.name, GACHA_COST)
+    result = await adjust_quota(client, "deduct", message.author.name, cost)
     if result is None:
         await message.channel.send("🎴 扣除额度失败，请稍后再试。")
         return
@@ -173,7 +175,7 @@ async def handle_gacha(
 
     # 十连抽生效：自动抽十次
     if consume_effect(message.author.id, "multidraw"):
-        await _handle_multidraw(message, client)
+        await _handle_multidraw(message, client, cost)
         return
 
     card_key = _draw_card()
@@ -181,7 +183,7 @@ async def handle_gacha(
 
     if card_key == "blank":
         await message.channel.send(
-            f"🎴 {message.author.mention} 消耗 {GACHA_COST} 点抽卡……\n"
+            f"🎴 {message.author.mention} 消耗 {cost} 点抽卡……\n"
             f"💨 **空白**！{desc}。"
         )
         return
@@ -200,14 +202,14 @@ async def handle_gacha(
     remaining = GACHA_ROB_MAX_COUNT if card_key in ("madman", "weak") else 1
     _add_effect(message.author.id, card_key, remaining)
     await message.channel.send(
-        f"🎴 {message.author.mention} 消耗 {GACHA_COST} 点抽卡……\n"
+        f"🎴 {message.author.mention} 消耗 {cost} 点抽卡……\n"
         f"✨ **{name}**！{desc}。"
     )
 
 
-async def _handle_multidraw(message: discord.Message, client: httpx.AsyncClient) -> None:
+async def _handle_multidraw(message: discord.Message, client: httpx.AsyncClient, cost: int) -> None:
     """十连抽：一次抽十张卡，逐张结算（自爆卡不进十连池子）。"""
-    lines = [f"🎴 {message.author.mention} 发动 **十连抽**！消耗 {GACHA_COST} 点抽十次："]
+    lines = [f"🎴 {message.author.mention} 发动 **十连抽**！消耗 {cost} 点抽十次："]
     for i in range(10):
         card_key = _draw_card(exclude={"selfdestruct"})
         name, desc, _ = CARD_POOL[card_key]
