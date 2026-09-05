@@ -28,6 +28,9 @@ from roulette.constants import (
     BEG_TIMEOUT_SECONDS,
     BIG_RED_PACKET_INTERVAL_SECONDS,
     BIG_RED_PACKET_POOL,
+    BANK_BALANCE_KEYWORD,
+    BANK_KEYWORD,
+    BANK_WITHDRAW_KEYWORD,
     COOLDOWN_SECONDS,
     CURSE_KEYWORD,
     DUEL_COOLDOWN_SECONDS,
@@ -54,6 +57,7 @@ from roulette.constants import (
     SEDUCE_KEYWORD,
     TRIGGER_KEYWORD,
 )
+from roulette.bank import handle_bank_balance, handle_deposit, handle_withdraw
 from roulette.curse import handle_curse
 from roulette.dice_game import DiceGame
 from roulette.duel import DuelView
@@ -188,6 +192,21 @@ def start_roulette(bot: "SukakaBot") -> None:
         # 我的卡牌：查看持有的持续型卡牌
         if content == MY_CARDS_KEYWORD:
             await handle_my_cards(message)
+            return
+
+        # 存钱：将 50% 额度存入地精银行
+        if content == BANK_KEYWORD:
+            await handle_deposit(message, client)
+            return
+
+        # 取钱：取出全部存款，随机扣除 50%-100% 手续费
+        if content == BANK_WITHDRAW_KEYWORD:
+            await handle_withdraw(message, client)
+            return
+
+        # 我的钱：查看地精银行余额
+        if content == BANK_BALANCE_KEYWORD:
+            await handle_bank_balance(message)
             return
 
         # 诱惑：使用诱惑卡强制结婚
