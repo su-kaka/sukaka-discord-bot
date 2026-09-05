@@ -190,10 +190,20 @@ class PacketView(discord.ui.View):
             for user in self.grabbers:
                 if user not in results_map:
                     results_map[user] = 0
+            # 幸运儿生效：下次抢红包必定最大（延迟导入避免循环依赖）
+            from roulette.gacha import consume_effect
+
+            for user in self.grabbers:
+                if consume_effect(user.id, "lucky"):
+                    max_idx = max(results_map, key=results_map.get)
+                    if results_map[user] < results_map[max_idx]:
+                        results_map[user], results_map[max_idx] = results_map[max_idx], results_map[user]
+                        lucky_note = f"\n🃏 幸运儿生效！{user.mention} 必定抢到最大份！"
+                    break
             ordered_results = [(user, results_map[user]) for user in self.grabbers]
         else:
             shares = split_random_capped(self.pool, count, self.max_share or self.pool)
-            # 幸运儿生效：下次抢大红包必定最大（延迟导入避免循环依赖）
+            # 幸运儿生效：下次抢红包必定最大（延迟导入避免循环依赖）
             from roulette.gacha import consume_effect
 
             for user in self.grabbers:
