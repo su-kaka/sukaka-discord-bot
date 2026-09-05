@@ -32,6 +32,7 @@ CARD_POOL: dict[str, tuple[str, str, int]] = {
     "weak": ("虚弱", f"{GACHA_ROB_MAX_COUNT} 次内被抢劫必定被抢成功", 10),
     "seduce": ("诱惑", "强制和某人结婚（50% 概率失败）", 10),
     "robinhood": ("劫富济贫", "排名前十的用户随机分你 1-10 点", 10),
+    "multidraw": ("十连抽", "下次抽卡自动抽十次", 10),
     "blank": ("空白", "无效果", 40),  # 实际概率由 GACHA_BLANK_CHANCE 控制
 }
 
@@ -138,6 +139,12 @@ async def handle_gacha(
         return
 
     gacha_cooldowns[message.author.id] = now + GACHA_COOLDOWN_SECONDS
+
+    # 十连抽生效：自动抽十次
+    if consume_effect(message.author.id, "multidraw"):
+        await _handle_multidraw(message, client)
+        return
+
     card_key = _draw_card()
     name, desc, _ = CARD_POOL[card_key]
 
@@ -160,6 +167,29 @@ async def handle_gacha(
         f"🎴 {message.author.mention} 消耗 {GACHA_COST} 点抽卡……\n"
         f"✨ **{name}**！{desc}。"
     )
+
+
+async def _handle_multidraw(message: discord.Message, client: httpx.AsyncClient) -> None:
+    """十连抽：一次抽十张卡，逐张结算。"""
+    lines = [f"🎴 {message.author.mention} 发动 **十连抽**！消耗 {GACHA_COST} 点抽十次："]
+    for i in range(10):
+        card_key = _draw_card()
+        name, desc, _ = CARD_POOL[card_key]
+
+        if card_key == "blank":
+            lines.append(f"{i+1}. 💨 空白")
+            continue
+
+        if card_key == "robinhood":
+            lines.append(f"{i+1}. ✨ **{name}**！立即结算……")
+            await _settle_robinhood(message, client)
+            continue
+
+        remaining = GACHA_ROB_MAX_COUNT if card_key in ("madman", "weak") else 1
+        _add_effect(message.author.id, card_key, remaining)
+        lines.append(f"{i+1}. ✨ **{name}**！{desc}")
+
+    await message.channel.send("\n".join(lines))
 
 
 async def _settle_robinhood(message: discord.Message, client: httpx.AsyncClient) -> None:
