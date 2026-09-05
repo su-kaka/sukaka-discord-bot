@@ -152,8 +152,11 @@ class PacketView(discord.ui.View):
 
         if is_full:
             await self._settle()
-        elif self.message:
-            await self.message.edit(content=self._packet_text(), view=self)
+        elif self.message and not self.completed:
+            try:
+                await self.message.edit(content=self._packet_text(), view=self)
+            except (discord.NotFound, discord.HTTPException):
+                pass
 
     # ---------- 结算 ----------
 
