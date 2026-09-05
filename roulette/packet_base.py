@@ -10,7 +10,6 @@ import discord
 import httpx
 
 from roulette.api import adjust_quota
-from roulette.gacha import consume_effect
 from roulette.utils import make_arithmetic_question, split_random, split_random_capped
 
 
@@ -185,7 +184,9 @@ class PacketView(discord.ui.View):
             ordered_results = [(user, results_map[user]) for user in self.grabbers]
         else:
             shares = split_random_capped(self.pool, count, self.max_share or self.pool)
-            # 幸运儿生效：下次抢大红包必定最大
+            # 幸运儿生效：下次抢大红包必定最大（延迟导入避免循环依赖）
+            from roulette.gacha import consume_effect
+
             for user in self.grabbers:
                 if consume_effect(user.id, "lucky"):
                     max_idx = shares.index(max(shares))
