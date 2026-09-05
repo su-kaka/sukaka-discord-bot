@@ -7,6 +7,7 @@ import random
 import sqlite3
 import time
 from pathlib import Path
+from typing import Optional
 
 import discord
 import httpx
@@ -21,6 +22,7 @@ from roulette.constants import (
     GACHA_SEDUCE_SUCCESS_CHANCE,
     MARRY_FEE,
 )
+from roulette.utils import split_random
 
 DB_PATH = Path(os.getenv("GACHA_DB", GACHA_DB))
 
@@ -33,6 +35,7 @@ CARD_POOL: dict[str, tuple[str, str, int]] = {
     "seduce": ("诱惑", "强制和某人结婚（50% 概率失败）", 10),
     "robinhood": ("劫富济贫", "排名前十的用户随机分你 1-10 点", 10),
     "multidraw": ("十连抽", "下次抽卡自动抽十次", 10),
+    "selfdestruct": ("自爆", "额度归零，生成对应额度的红包供所有人抢", 10),
     "blank": ("空白", "无效果", 40),  # 实际概率由 GACHA_BLANK_CHANCE 控制
 }
 
@@ -184,6 +187,11 @@ async def handle_gacha(
         await _settle_robinhood(message, client)
         return
 
+    # 自爆立即结算，不存效果
+    if card_key == "selfdestruct":
+        await _settle_selfdestruct(message, client)
+        return
+
     # 狂徒/虚弱存 10 次，其余存 1 次
     remaining = GACHA_ROB_MAX_COUNT if card_key in ("madman", "weak") else 1
     _add_effect(message.author.id, card_key, remaining)
@@ -207,6 +215,11 @@ async def _handle_multidraw(message: discord.Message, client: httpx.AsyncClient)
         if card_key == "robinhood":
             lines.append(f"{i+1}. ✨ **{name}**！立即结算……")
             await _settle_robinhood(message, client)
+            continue
+
+        if card_key == "selfdestruct":
+            lines.append(f"{i+1}. 💥 **{name}**！立即结算……")
+            await _settle_selfdestruct(message, client)
             continue
 
         remaining = GACHA_ROB_MAX_COUNT if card_key in ("madman", "weak") else 1
@@ -245,6 +258,122 @@ async def _settle_robinhood(message: discord.Message, client: httpx.AsyncClient)
     else:
         lines.append("💨 前十名都身无分文，一无所获。")
     await message.channel.send("\n".join(lines))
+
+
+class SelfDestructPacketView(discord.ui.View):
+    """自爆红包：自爆者额度归零，奖池随机分给抢红包的人。"""
+
+    def __init__(
+        self,
+        sender: discord.Member | discord.User,
+        pool: int,
+        client: httpx.AsyncClient,
+    ) -> None:
+        super().__init__(timeout=60)
+        self.sender = sender
+        self.pool = pool
+        self.client = client
+        self.message: Optional[discord.Message] = None
+        self.completed = False
+        self.grabbers: list[discord.Member | discord.User] = []
+
+    def _packet_text(self) -> str:
+        names = "、".join(u.mention for u in self.grabbers) or "暂无"
+        return (
+            f"💥 {self.sender.mention} 自爆了一个红包！（{len(self.grabbers)}/10）\n"
+            f"奖池 **{self.pool} 点** 随机分给抢红包的人，手快有手慢无！\n"
+            f"已参与：{names}\n"
+            f"满 10 人立即开奖，60 秒未满按参与人数开奖。"
+        )
+
+    @discord.ui.button(label="抢红包", style=discord.ButtonStyle.danger, emoji="💥")
+    async def grab_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        user = interaction.user
+        if user.id == self.sender.id:
+            await interaction.response.send_message("不能抢自己的自爆红包。", ephemeral=True)
+            return
+        if self.completed:
+            await interaction.response.send_message("红包已开奖。", ephemeral=True)
+            return
+        if any(u.id == user.id for u in self.grabbers):
+            await interaction.response.send_message("你已经参与了。", ephemeral=True)
+            return
+
+        self.grabbers.append(user)
+        is_full = len(self.grabbers) >= 10
+        if is_full:
+            self.completed = True
+
+        await interaction.response.send_message(
+            f"💥 已参与 {self.sender.mention} 的自爆红包（{len(self.grabbers)}/10），等待开奖！",
+            ephemeral=True,
+        )
+
+        if is_full:
+            await self._settle()
+        elif self.message:
+            await self.message.edit(content=self._packet_text(), view=self)
+
+    async def _settle(self) -> None:
+        """开奖：奖池随机分给参与者。"""
+        self.completed = True
+        for item in self.children:
+            item.disabled = True  # type: ignore[union-attr]
+
+        count = len(self.grabbers)
+        if count == 0:
+            if self.message:
+                await self.message.edit(content="💥 自爆红包无人参与，已过期。", view=None)
+            return
+
+        shares = split_random(self.pool, count)
+        results: list[tuple[discord.Member | discord.User, int, Optional[int]]] = []
+        for user, amount in zip(self.grabbers, shares):
+            new_quota = await adjust_quota(self.client, "grant", user.name, amount)
+            results.append((user, amount, new_quota))
+
+        lines = [
+            f"💥 {self.sender.mention} 的自爆红包开奖！"
+            f"（{count} 人参与，奖池 {self.pool} 点）"
+        ]
+        for user, amount, new_quota in sorted(results, key=lambda r: r[1], reverse=True):
+            if new_quota is None:
+                lines.append(f"💥 {user.mention} 抢到 **{amount} 点**（发放失败，请联系管理员）")
+            else:
+                lines.append(f"💥 {user.mention} 抢到 **{amount} 点**（当前 {new_quota} 点）")
+
+        if self.message:
+            await self.message.edit(content="\n".join(lines), view=None)
+
+    async def on_timeout(self) -> None:
+        if self.completed:
+            return
+        await self._settle()
+
+
+async def _settle_selfdestruct(message: discord.Message, client: httpx.AsyncClient) -> None:
+    """自爆：额度归零，生成对应额度的红包。"""
+    quota = await query_quota(client, message.author.name)
+    if quota is None:
+        await message.channel.send("💥 查询额度失败，请稍后再试。")
+        return
+    if quota <= 0:
+        await message.channel.send("💥 你额度为 0，自爆无效果。")
+        return
+
+    # 清零额度
+    result = await adjust_quota(client, "deduct", message.author.name, quota)
+    if result is None:
+        await message.channel.send("💥 扣除额度失败，请稍后再试。")
+        return
+
+    await message.channel.send(
+        f"💥 {message.author.mention} 抽中 **自爆**！额度 **{quota} 点** 已归零！"
+    )
+
+    # 生成自爆红包
+    view = SelfDestructPacketView(message.author, quota, client)
+    view.message = await message.channel.send(view._packet_text(), view=view)
 
 
 async def handle_seduce(
