@@ -86,7 +86,7 @@ async def handle_rob(
         success = random.random() < 0.5
 
     if success:
-        # 抢劫成功：按对方额度的百分比抢夺，随机销毁抢到金额的 1%-50%
+        # 抢劫成功：按对方额度的百分比抢夺，实得不超过抢劫者身家，随机销毁 1%-50%
         target_quota = await query_quota(client, target.name)
         if target_quota is None:
             await message.channel.send("🔫 查询对方额度失败，抢劫取消。")
@@ -105,6 +105,10 @@ async def handle_rob(
         fee_percent = random.randint(ROB_FEE_MIN_PERCENT, ROB_FEE_MAX_PERCENT)
         fee = min(stolen, max(1, int(stolen * fee_percent / 100)))
         gain = stolen - fee
+        # 实得不能超过抢劫者身家总额
+        if gain > robber_quota:
+            gain = robber_quota
+            fee = stolen - gain
         if gain > 0:
             new_quota = await adjust_quota(client, "grant", message.author.name, gain)
             if new_quota is None:
