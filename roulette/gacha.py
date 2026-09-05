@@ -335,8 +335,6 @@ class SelfDestructPacketView(discord.ui.View):
 
         self.grabbers.append(user)
         is_full = len(self.grabbers) >= 10
-        if is_full:
-            self.completed = True
 
         await interaction.response.send_message(
             f"💥 验证通过，已参与 {self.sender.mention} 的自爆红包（{len(self.grabbers)}/10），等待开奖！",

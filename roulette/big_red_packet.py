@@ -97,8 +97,6 @@ class BigRedPacketView(discord.ui.View):
         # 原子加入：append 与满员判断之间不插入 await
         self.grabbers.append(user)
         is_full = len(self.grabbers) >= BIG_RED_PACKET_MAX_GRABBERS
-        if is_full:
-            self.completed = True
 
         await interaction.response.send_message(
             f"🧧 验证通过，已参与大红包（{len(self.grabbers)}/{BIG_RED_PACKET_MAX_GRABBERS}），等待开奖！",

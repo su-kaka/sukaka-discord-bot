@@ -66,8 +66,6 @@ class RedPacketView(discord.ui.View):
         # 原子加入：append 与满员判断之间不插入 await
         self.grabbers.append(user)
         is_full = len(self.grabbers) >= RED_PACKET_MAX_GRABBERS
-        if is_full:
-            self.completed = True
 
         await interaction.response.send_message(
             f"🧧 已参与 {self.sender.mention} 的红包（{len(self.grabbers)}/{RED_PACKET_MAX_GRABBERS}），"
