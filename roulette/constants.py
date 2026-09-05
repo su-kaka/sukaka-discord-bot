@@ -32,11 +32,12 @@ RED_PACKET_TIMEOUT_SECONDS = 60
 RED_PACKET_COOLDOWN_SECONDS = 30
 
 ROB_KEYWORD = "抢劫"
-ROB_MIN_AMOUNT = 1
-ROB_MAX_AMOUNT = 10
 ROB_MIN_QUOTA = 10  # 低于此额度无抢劫能力
-ROB_FEE = 1  # 每次额度交换销毁 1 点
+ROB_FEE_MIN_PERCENT = 1  # 抢劫成功随机销毁比例下限（%）
+ROB_FEE_MAX_PERCENT = 50  # 抢劫成功随机销毁比例上限（%）
 ROB_COOLDOWN_SECONDS = 60
+ROB_MIN_PERCENT = 10  # 百分比伤害下限（%）
+ROB_MAX_PERCENT = 30  # 百分比伤害上限（%）
 
 MARRY_KEYWORD = "结婚"
 MARRY_FEE = 10  # 手续费销毁

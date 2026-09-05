@@ -1,4 +1,4 @@
-"""抢劫：50% 抢到对方 1-5 点，50% 被反杀自己扣 1-5 点。"""
+"""抢劫：50% 抢到对方 10%-30% 点，50% 被反杀自己扣 10%-30% 点。"""
 
 from __future__ import annotations
 
@@ -11,9 +11,10 @@ import httpx
 from roulette.api import adjust_quota, query_quota
 from roulette.constants import (
     ROB_COOLDOWN_SECONDS,
-    ROB_FEE,
-    ROB_MAX_AMOUNT,
-    ROB_MIN_AMOUNT,
+    ROB_FEE_MAX_PERCENT,
+    ROB_FEE_MIN_PERCENT,
+    ROB_MAX_PERCENT,
+    ROB_MIN_PERCENT,
     ROB_MIN_QUOTA,
 )
 from roulette.gacha import consume_effect, has_effect
@@ -28,9 +29,9 @@ async def handle_rob(
     """处理「抢劫 @某人」命令。"""
     if not message.mentions:
         await message.channel.send(
-            f"🔫 用法：`抢劫 @某人`，50% 抢到对方 {ROB_MIN_AMOUNT}-{ROB_MAX_AMOUNT} 点，"
-            f"50% 被反杀自己扣 {ROB_MIN_AMOUNT}-{ROB_MAX_AMOUNT} 点"
-            f"（每次额度交换销毁 {ROB_FEE} 点，需额度 ≥ {ROB_MIN_QUOTA} 点）。"
+            f"🔫 用法：`抢劫 @某人`，50% 抢到对方 {ROB_MIN_PERCENT}%-{ROB_MAX_PERCENT}% 额度，"
+            f"50% 被反杀自己扣 {ROB_MIN_PERCENT}%-{ROB_MAX_PERCENT}% 额度"
+            f"（抢到部分随机销毁 {ROB_FEE_MIN_PERCENT}%-{ROB_FEE_MAX_PERCENT}%，需额度 ≥ {ROB_MIN_QUOTA} 点）。"
         )
         return
     target = message.mentions[0]
@@ -60,7 +61,7 @@ async def handle_rob(
     # 狂徒生效：抢劫 CD 缩短到 10 秒
     cooldown = 10 if has_effect(message.author.id, "madman") else ROB_COOLDOWN_SECONDS
     rob_cooldowns[message.author.id] = now + cooldown
-    amount = random.randint(ROB_MIN_AMOUNT, ROB_MAX_AMOUNT)
+    percent = random.randint(ROB_MIN_PERCENT, ROB_MAX_PERCENT)
 
     # 诅咒生效：被诅咒者抢劫必被反杀
     if message.author.id in cursed_users:
@@ -85,12 +86,13 @@ async def handle_rob(
         success = random.random() < 0.5
 
     if success:
-        # 抢劫成功：对方有多少扣多少（最多 amount），销毁 ROB_FEE 点
+        # 抢劫成功：按对方额度的百分比抢夺，随机销毁抢到金额的 1%-50%
         target_quota = await query_quota(client, target.name)
         if target_quota is None:
             await message.channel.send("🔫 查询对方额度失败，抢劫取消。")
             return
-        stolen = min(amount, target_quota)
+        stolen = max(1, int(target_quota * percent / 100))
+        stolen = min(stolen, target_quota)
         if stolen <= 0:
             await message.channel.send(
                 f"🔫 {message.author.mention} 抢劫 {target.mention}，但对方身无分文，一无所获！"
@@ -100,7 +102,9 @@ async def handle_rob(
         if deducted is None:
             await message.channel.send("🔫 抢劫失败，请稍后再试。")
             return
-        gain = stolen - ROB_FEE
+        fee_percent = random.randint(ROB_FEE_MIN_PERCENT, ROB_FEE_MAX_PERCENT)
+        fee = min(stolen, max(1, int(stolen * fee_percent / 100)))
+        gain = stolen - fee
         if gain > 0:
             new_quota = await adjust_quota(client, "grant", message.author.name, gain)
             if new_quota is None:
@@ -111,17 +115,18 @@ async def handle_rob(
             new_quota = robber_quota
         await message.channel.send(
             f"🔫 {message.author.mention} 抢劫 {target.mention} 成功！\n"
-            f"抢到 **{stolen} 点**（销毁 {ROB_FEE} 点，实得 {gain} 点，当前 {new_quota} 点），"
+            f"抢到 **{stolen} 点**（{percent}% 额度，销毁 {fee} 点（{fee_percent}%），实得 {gain} 点，当前 {new_quota} 点），"
             f"{target.mention} 剩余 {deducted} 点。"
         )
     else:
-        # 被反杀：自己扣 amount（有多少扣多少），全销毁
-        loss = min(amount, robber_quota)
+        # 被反杀：按自己额度的百分比扣除，全销毁
+        loss = max(1, int(robber_quota * percent / 100))
+        loss = min(loss, robber_quota)
         new_quota = await adjust_quota(client, "deduct", message.author.name, loss)
         if new_quota is None:
             await message.channel.send("🔫 结算失败，请稍后再试。")
             return
         await message.channel.send(
             f"🛡️ {message.author.mention} 抢劫 {target.mention} 被反杀！\n"
-            f"被扣除 **{loss} 点**（已销毁），当前额度 {new_quota} 点。"
+            f"被扣除 **{loss} 点**（{percent}% 额度，已销毁），当前额度 {new_quota} 点。"
         )
