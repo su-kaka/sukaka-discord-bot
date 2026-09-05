@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import random
+import time
 from typing import Callable, Optional
 
 import discord
@@ -60,6 +61,7 @@ class PacketView(discord.ui.View):
         self.completed = False
         self.grabbers: list[discord.Member | discord.User] = []
         self.failed_users: set[int] = set()
+        self._last_edit_time = 0.0  # 上次编辑时间，用于限流
         self.question, self.answer, options = make_arithmetic_question()
         for value in options:
             self.add_item(self._make_option_button(value))
@@ -153,10 +155,14 @@ class PacketView(discord.ui.View):
         if is_full:
             await self._settle()
         elif self.message and not self.completed:
-            try:
-                await self.message.edit(content=self._packet_text(), view=self)
-            except (discord.NotFound, discord.HTTPException):
-                pass
+            # 两次编辑间隔至少 1 秒，避免触发 Discord 429 限流
+            now = time.monotonic()
+            if now - self._last_edit_time >= 1.0:
+                self._last_edit_time = now
+                try:
+                    await self.message.edit(content=self._packet_text(), view=self)
+                except (discord.NotFound, discord.HTTPException):
+                    pass
 
     # ---------- 结算 ----------
 
