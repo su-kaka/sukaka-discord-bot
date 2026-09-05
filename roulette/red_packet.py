@@ -1,4 +1,4 @@
-"""红包：发送者押 10 点，8 点随机分给抢红包的人（2 点销毁）。"""
+"""红包：发送者押额度的 10%（最少 10 点），80% 随机分给抢红包的人（20% 销毁）。"""
 
 from __future__ import annotations
 
@@ -10,27 +10,30 @@ import httpx
 
 from roulette.api import adjust_quota
 from roulette.constants import (
-    RED_PACKET_COST,
+    RED_PACKET_FEE_PERCENT,
     RED_PACKET_MAX_GRABBERS,
     RED_PACKET_MAX_WINNERS,
-    RED_PACKET_POOL,
     RED_PACKET_TIMEOUT_SECONDS,
 )
 from roulette.utils import split_random
 
 
 class RedPacketView(discord.ui.View):
-    """红包视图：发送者押 10 点，8 点随机分给抢红包的人（2 点销毁）。"""
+    """红包视图：发送者押额度的 10%（最少 10 点），80% 随机分给抢红包的人（20% 销毁）。"""
 
     def __init__(
         self,
         sender: discord.Member | discord.User,
         client: httpx.AsyncClient,
+        cost: int,
+        pool: int,
         on_finish: Optional[object] = None,
     ) -> None:
         super().__init__(timeout=RED_PACKET_TIMEOUT_SECONDS)
         self.sender = sender
         self.client = client
+        self.cost = cost
+        self.pool = pool
         self.message: Optional[discord.Message] = None
         self.completed = False
         self.grabbers: list[discord.Member | discord.User] = []
@@ -42,10 +45,11 @@ class RedPacketView(discord.ui.View):
 
     def _packet_text(self) -> str:
         names = "、".join(u.mention for u in self.grabbers) or "暂无"
+        fee = self.cost - self.pool
         return (
             f"🧧 {self.sender.mention} 发了一个红包！（{len(self.grabbers)}/{RED_PACKET_MAX_GRABBERS}）\n"
-            f"{RED_PACKET_POOL} 点随机分给最多 {RED_PACKET_MAX_WINNERS} 个幸运儿"
-            f"（红包 {RED_PACKET_COST} 点，2 点销毁），其余人抢 0 点！\n"
+            f"{self.pool} 点随机分给最多 {RED_PACKET_MAX_WINNERS} 个幸运儿"
+            f"（红包 {self.cost} 点，{fee} 点销毁），其余人抢 0 点！\n"
             f"已参与：{names}\n"
             f"满 {RED_PACKET_MAX_GRABBERS} 人立即开奖，{RED_PACKET_TIMEOUT_SECONDS} 秒未满按参与人数开奖。"
         )
@@ -89,7 +93,7 @@ class RedPacketView(discord.ui.View):
             item.disabled = True  # type: ignore[union-attr]
         winner_count = min(RED_PACKET_MAX_WINNERS, len(self.grabbers))
         winners = random.sample(self.grabbers, winner_count)
-        shares = split_random(RED_PACKET_POOL, winner_count)
+        shares = split_random(self.pool, winner_count)
 
         results: list[tuple[discord.Member | discord.User, int, Optional[int]]] = []
         for user, amount in zip(winners, shares):
@@ -101,7 +105,7 @@ class RedPacketView(discord.ui.View):
 
         lines = [
             f"🧧 {self.sender.mention} 的红包开奖！"
-            f"（{len(self.grabbers)} 人参与，{winner_count} 人中奖，奖池 {RED_PACKET_POOL} 点）"
+            f"（{len(self.grabbers)} 人参与，{winner_count} 人中奖，奖池 {self.pool} 点）"
         ]
         for user, amount, new_quota in sorted(results, key=lambda r: r[1], reverse=True):
             if amount == 0:
@@ -119,10 +123,10 @@ class RedPacketView(discord.ui.View):
             return
         if not self.grabbers:
             self._finish()
-            await adjust_quota(self.client, "grant", self.sender.name, RED_PACKET_COST)
+            await adjust_quota(self.client, "grant", self.sender.name, self.cost)
             if self.message:
                 await self.message.edit(
-                    content=f"🧧 {self.sender.mention} 的红包无人参与，已退回 {RED_PACKET_COST} 点。",
+                    content=f"🧧 {self.sender.mention} 的红包无人参与，已退回 {self.cost} 点。",
                     view=None,
                 )
             return

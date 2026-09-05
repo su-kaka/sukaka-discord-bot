@@ -45,8 +45,10 @@ from roulette.constants import (
     PLAYER_COUNT,
     QUOTA_CHANNEL_ID,
     RED_PACKET_COOLDOWN_SECONDS,
-    RED_PACKET_COST,
+    RED_PACKET_COST_PERCENT,
+    RED_PACKET_FEE_PERCENT,
     RED_PACKET_KEYWORD,
+    RED_PACKET_MIN_COST,
     ROB_KEYWORD,
     SEDUCE_KEYWORD,
     TRIGGER_KEYWORD,
@@ -256,22 +258,25 @@ def start_roulette(bot: "SukakaBot") -> None:
             if quota is None:
                 await message.channel.send("🧧 查询额度失败，请稍后再试。")
                 return
-            if quota < RED_PACKET_COST:
+            cost = max(RED_PACKET_MIN_COST, int(quota * RED_PACKET_COST_PERCENT / 100))
+            if quota < cost:
                 await message.channel.send(
-                    f"🧧 额度不足：当前 {quota} 点，发红包需要 {RED_PACKET_COST} 点。"
+                    f"🧧 额度不足：当前 {quota} 点，发红包需要 {cost} 点（额度的 {RED_PACKET_COST_PERCENT}%，最少 {RED_PACKET_MIN_COST} 点）。"
                 )
                 return
 
             # 先扣款再发红包
-            result = await adjust_quota(client, "deduct", message.author.name, RED_PACKET_COST)
+            result = await adjust_quota(client, "deduct", message.author.name, cost)
             if result is None:
                 await message.channel.send("🧧 扣除额度失败，请稍后再试。")
                 return
 
+            pool = cost - int(cost * RED_PACKET_FEE_PERCENT / 100)
+
             def _rp_cooldown(user_id: int = message.author.id) -> None:
                 red_packet_cooldowns[user_id] = time.monotonic() + RED_PACKET_COOLDOWN_SECONDS
 
-            view = RedPacketView(message.author, client, on_finish=_rp_cooldown)
+            view = RedPacketView(message.author, client, cost, pool, on_finish=_rp_cooldown)
             view.message = await message.channel.send(view._packet_text(), view=view)
             return
 
