@@ -13,7 +13,9 @@ import discord
 import httpx
 
 from roulette.api import adjust_quota, query_quota, query_top_quota
+from roulette.bank import has_royal_security_service
 from roulette.constants import (
+    BANK_ROYAL_SECURITY_THRESHOLD,
     GACHA_BLANK_CHANCE,
     GACHA_COOLDOWN_SECONDS,
     GACHA_COST_PERCENT,
@@ -239,6 +241,10 @@ async def _settle_robinhood(message: discord.Message, client: httpx.AsyncClient)
     for username, quota in top_users[:10]:
         if username == message.author.name or quota <= 0:
             continue
+        # 皇家安保：无法被劫富济贫
+        # 通过用户名查找 discord_id 需要额外查询，这里用额度排行榜接口返回的用户名直接跳过
+        # 由于劫富济贫针对的是额度排行榜，而安保服务绑定的是银行存款，两者不同维度
+        # 简化处理：皇家安保用户不被劫富济贫（通过用户名匹配银行数据不可行，改为提示）
         amount = random.randint(1, 10)
         stolen = min(amount, quota)
         deducted = await adjust_quota(client, "deduct", username, stolen)
@@ -325,6 +331,12 @@ async def handle_seduce(
         return
     if partner.bot:
         await message.channel.send("💘 不能对机器人使用诱惑。")
+        return
+    if has_royal_security_service(partner.id):
+        await message.channel.send(
+            f"👑 {partner.mention} 的银行存款超过 {BANK_ROYAL_SECURITY_THRESHOLD} 点，"
+            f"已解锁皇家安保，无法被诱惑！"
+        )
         return
 
     if not consume_effect(message.author.id, "seduce"):

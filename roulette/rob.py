@@ -9,7 +9,9 @@ import discord
 import httpx
 
 from roulette.api import adjust_quota, query_quota
+from roulette.bank import has_security_service
 from roulette.constants import (
+    BANK_SECURITY_THRESHOLD,
     ROB_COOLDOWN_SECONDS,
     ROB_FEE_MAX_PERCENT,
     ROB_FEE_MIN_PERCENT,
@@ -40,6 +42,12 @@ async def handle_rob(
         return
     if target.bot:
         await message.channel.send("🔫 不能抢劫机器人。")
+        return
+    if has_security_service(target.id):
+        await message.channel.send(
+            f"🛡️ {target.mention} 的银行存款超过 {BANK_SECURITY_THRESHOLD} 点，"
+            f"已解锁安保服务，无法被抢劫！"
+        )
         return
     now = time.monotonic()
     cooldown_until = rob_cooldowns.get(message.author.id, 0.0)

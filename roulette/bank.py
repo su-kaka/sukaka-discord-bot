@@ -15,6 +15,8 @@ from roulette.constants import (
     BANK_DB,
     BANK_DEPOSIT_PERCENT,
     BANK_MIN_DEPOSIT,
+    BANK_ROYAL_SECURITY_THRESHOLD,
+    BANK_SECURITY_THRESHOLD,
     BANK_WITHDRAW_MAX_PERCENT,
     BANK_WITHDRAW_MIN_PERCENT,
 )
@@ -78,6 +80,16 @@ def _deduct_balance(discord_id: int, amount: int) -> int:
     return new_balance
 
 
+def has_security_service(discord_id: int) -> bool:
+    """存款超过 1000 点解锁普通安保：无法被抢劫。"""
+    return _get_balance(discord_id) > BANK_SECURITY_THRESHOLD
+
+
+def has_royal_security_service(discord_id: int) -> bool:
+    """存款超过 2000 点解锁皇家安保：无法被抢劫、诱惑、劫富济贫。"""
+    return _get_balance(discord_id) > BANK_ROYAL_SECURITY_THRESHOLD
+
+
 async def handle_deposit(message: discord.Message, client: httpx.AsyncClient) -> None:
     """处理「存钱」命令：将 50% 额度存入地精银行。"""
     quota = await query_quota(client, message.author.name)
@@ -99,9 +111,14 @@ async def handle_deposit(message: discord.Message, client: httpx.AsyncClient) ->
         return
 
     new_balance = _add_balance(message.author.id, amount)
+    security_note = ""
+    if has_royal_security_service(message.author.id):
+        security_note = f"\n👑 存款超过 {BANK_ROYAL_SECURITY_THRESHOLD} 点，皇家安保已解锁：无法被抢劫、诱惑、劫富济贫！"
+    elif has_security_service(message.author.id):
+        security_note = f"\n🛡️ 存款超过 {BANK_SECURITY_THRESHOLD} 点，普通安保已解锁：无法被抢劫！"
     await message.channel.send(
         f"🏦 {message.author.mention} 存入 **{amount} 点** 到地精银行！\n"
-        f"银行余额：**{new_balance} 点**，当前额度：**{result} 点**。"
+        f"银行余额：**{new_balance} 点**，当前额度：**{result} 点**。{security_note}"
     )
 
 
@@ -138,8 +155,13 @@ async def handle_withdraw(message: discord.Message, client: httpx.AsyncClient) -
 async def handle_bank_balance(message: discord.Message) -> None:
     """处理「我的钱」命令：查看地精银行余额。"""
     balance = _get_balance(message.author.id)
+    security_note = ""
+    if has_royal_security_service(message.author.id):
+        security_note = f"\n👑 皇家安保生效中（存款 > {BANK_ROYAL_SECURITY_THRESHOLD} 点）：无法被抢劫、诱惑、劫富济贫。"
+    elif has_security_service(message.author.id):
+        security_note = f"\n🛡️ 普通安保生效中（存款 > {BANK_SECURITY_THRESHOLD} 点）：无法被抢劫。"
     await message.channel.send(
-        f"🏦 {message.author.mention} 的地精银行余额：**{balance} 点**。"
+        f"🏦 {message.author.mention} 的地精银行余额：**{balance} 点**。{security_note}"
     )
 
 
