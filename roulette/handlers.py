@@ -17,7 +17,7 @@ from roulette.beg import BegView
 from roulette.big_red_packet import big_red_packet_loop
 from roulette.constants import (
     ALLIN_COOLDOWN_SECONDS,
-    ALLIN_FEE,
+    ALLIN_FEE_PERCENT,
     ALLIN_KEYWORD,
     ALLIN_MIN_QUOTA,
     API_TIMEOUT_SECONDS,
@@ -219,13 +219,15 @@ def start_roulette(bot: "SukakaBot") -> None:
                 await message.channel.send("🎰 扣除额度失败，请稍后再试。")
                 return
 
-            stake = quota - ALLIN_FEE  # 扣手续费后的赌注
+            stake = quota  # 全部额度作为赌注
             # 一念天堂生效：成功概率不变（文字描述仍为 75%），成功翻四倍
             heaven = consume_effect(message.author.id, "heaven")
             success_chance = 0.5
             if random.random() < success_chance:
                 multiplier = 4 if heaven else 2
-                prize = stake * multiplier
+                gross_prize = stake * multiplier
+                fee = int(gross_prize * ALLIN_FEE_PERCENT / 100)
+                prize = gross_prize - fee
                 new_quota = await adjust_quota(client, "grant", message.author.name, prize)
                 heaven_note = "\n🃏 一念天堂生效！成功概率提升，翻四倍！" if heaven else ""
                 if new_quota is None:
@@ -235,13 +237,13 @@ def start_roulette(bot: "SukakaBot") -> None:
                     )
                     return
                 await message.channel.send(
-                    f"🎰🎉 {message.author.mention} 梭哈 **{quota} 点**（手续费 {ALLIN_FEE} 点销毁）\n"
-                    f"🃏 翻倍成功！赢得 **{prize} 点**，当前额度 {new_quota} 点！{heaven_note}"
+                    f"🎰🎉 {message.author.mention} 梭哈 **{quota} 点**\n"
+                    f"🃏 翻倍成功！毛奖金 **{gross_prize} 点**，手续费 {fee} 点（{ALLIN_FEE_PERCENT}%）销毁，实得 **{prize} 点**，当前额度 {new_quota} 点！{heaven_note}"
                 )
             else:
                 # 清零：全部销毁
                 await message.channel.send(
-                    f"🎰💥 {message.author.mention} 梭哈 **{quota} 点**（手续费 {ALLIN_FEE} 点销毁）\n"
+                    f"🎰💥 {message.author.mention} 梭哈 **{quota} 点**\n"
                     f"🃏 运气不佳，全部清零！当前额度 0 点。"
                 )
             return
