@@ -56,11 +56,11 @@ def _init_db() -> None:
         )
 
 
-def _draw_card() -> str:
+def _draw_card(exclude: Optional[set[str]] = None) -> str:
     """抽一张卡：GACHA_BLANK_CHANCE 概率空白，其余均分。"""
     if random.random() < GACHA_BLANK_CHANCE:
         return "blank"
-    keys = [k for k in CARD_POOL if k != "blank"]
+    keys = [k for k in CARD_POOL if k != "blank" and (exclude is None or k not in exclude)]
     return random.choice(keys)
 
 
@@ -202,10 +202,10 @@ async def handle_gacha(
 
 
 async def _handle_multidraw(message: discord.Message, client: httpx.AsyncClient) -> None:
-    """十连抽：一次抽十张卡，逐张结算。"""
+    """十连抽：一次抽十张卡，逐张结算（自爆卡不进十连池子）。"""
     lines = [f"🎴 {message.author.mention} 发动 **十连抽**！消耗 {GACHA_COST} 点抽十次："]
     for i in range(10):
-        card_key = _draw_card()
+        card_key = _draw_card(exclude={"selfdestruct"})
         name, desc, _ = CARD_POOL[card_key]
 
         if card_key == "blank":
@@ -215,11 +215,6 @@ async def _handle_multidraw(message: discord.Message, client: httpx.AsyncClient)
         if card_key == "robinhood":
             lines.append(f"{i+1}. ✨ **{name}**！立即结算……")
             await _settle_robinhood(message, client)
-            continue
-
-        if card_key == "selfdestruct":
-            lines.append(f"{i+1}. 💥 **{name}**！立即结算……")
-            await _settle_selfdestruct(message, client)
             continue
 
         remaining = GACHA_ROB_MAX_COUNT if card_key in ("madman", "weak") else 1
