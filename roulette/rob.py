@@ -12,12 +12,11 @@ from roulette.api import adjust_quota, query_quota
 from roulette.constants import (
     ROB_COOLDOWN_SECONDS,
     ROB_FEE,
-    ROB_KEYWORD,
     ROB_MAX_AMOUNT,
     ROB_MIN_AMOUNT,
     ROB_MIN_QUOTA,
 )
-from roulette.gacha import consume_effect
+from roulette.gacha import consume_effect, has_effect
 
 
 async def handle_rob(
@@ -58,7 +57,9 @@ async def handle_rob(
         )
         return
 
-    rob_cooldowns[message.author.id] = now + ROB_COOLDOWN_SECONDS
+    # 狂徒生效：抢劫 CD 缩短到 10 秒
+    cooldown = 10 if has_effect(message.author.id, "madman") else ROB_COOLDOWN_SECONDS
+    rob_cooldowns[message.author.id] = now + cooldown
     amount = random.randint(ROB_MIN_AMOUNT, ROB_MAX_AMOUNT)
 
     # 诅咒生效：被诅咒者抢劫必被反杀
