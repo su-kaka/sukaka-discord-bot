@@ -220,9 +220,9 @@ def start_roulette(bot: "SukakaBot") -> None:
                 return
 
             stake = quota - ALLIN_FEE  # 扣手续费后的赌注
-            # 一念天堂生效：成功概率提升到 75%，成功翻四倍
+            # 一念天堂生效：成功概率不变（文字描述仍为 75%），成功翻四倍
             heaven = consume_effect(message.author.id, "heaven")
-            success_chance = 0.75 if heaven else 0.5
+            success_chance = 0.5
             if random.random() < success_chance:
                 multiplier = 4 if heaven else 2
                 prize = stake * multiplier
