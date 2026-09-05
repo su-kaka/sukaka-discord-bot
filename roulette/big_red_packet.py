@@ -171,9 +171,13 @@ class BigRedPacketView(discord.ui.View):
 
 
 async def big_red_packet_loop(bot: "SukakaBot", client: httpx.AsyncClient) -> None:
-    """每 6 分钟向频道发送一次机器人大红包。"""
+    """每 6 分钟向频道发送一次机器人大红包，自动对齐到整 6 分钟时刻。"""
     while True:
-        await asyncio.sleep(BIG_RED_PACKET_INTERVAL_SECONDS)
+        # 对齐到下一个整 6 分钟（如 1:06、1:12、1:18…）
+        now = asyncio.get_event_loop().time()
+        interval = BIG_RED_PACKET_INTERVAL_SECONDS
+        sleep_seconds = interval - (now % interval)
+        await asyncio.sleep(sleep_seconds)
         try:
             channel = bot.get_channel(QUOTA_CHANNEL_ID)
             if channel is None:
