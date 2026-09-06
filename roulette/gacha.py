@@ -39,7 +39,7 @@ CARD_POOL: dict[str, tuple[str, str, int]] = {
     "madman": ("狂徒", "下次抢劫必定成功，抢劫 CD 缩短到 10 秒", 10),
     "weak": ("虚弱", "下次被抢劫必定被抢成功", 10),
     "seduce": ("诱惑", "强制和某人结婚（50% 概率失败）", 10),
-    "robinhood": ("劫富济贫", "排名前十的用户随机分你 1-10 点", 10),
+    "robinhood": ("劫富济贫", "排名前十的用户随机分你他们额度的 1%-10%", 10),
     "multidraw": ("十连抽", "下次抽卡自动抽十次", 10),
     "avatar": ("天神下凡", "下次抢银行成功率翻倍", 10),
     "selfdestruct": ("自爆", f"额度归零，随机销毁 {GACHA_SELFDESTRUCT_MIN_PERCENT}%-{GACHA_SELFDESTRUCT_MAX_PERCENT}%，剩余生成红包供所有人抢", 10),
@@ -231,7 +231,7 @@ async def _handle_multidraw(message: discord.Message, client: httpx.AsyncClient,
 
 
 async def _settle_robinhood(message: discord.Message, client: httpx.AsyncClient) -> None:
-    """劫富济贫：排名前十的用户随机分你 1-10 点。"""
+    """劫富济贫：排名前十的用户随机分你他们额度的 1%-10%。"""
     top_users = await query_top_quota(client)
     if not top_users:
         await message.channel.send("🎴 劫富济贫失败：暂无排行数据。")
@@ -255,7 +255,7 @@ async def _settle_robinhood(message: discord.Message, client: httpx.AsyncClient)
                 lines.append(f"👑 {username} 有皇家安保，无法被劫富济贫！")
                 continue
         amount = random.randint(1, 10)
-        stolen = min(amount, quota)
+        stolen = min(int(quota * amount / 100), quota)
         deducted = await adjust_quota(client, "deduct", username, stolen)
         if deducted is None:
             continue
