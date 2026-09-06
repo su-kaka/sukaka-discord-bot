@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 import random
 import sqlite3
@@ -100,6 +101,58 @@ async def _call_quota_api(
         return None
 
 
+# ── 批量发送：控制发消息频率不低于 0.5s，多条通知合并 ──────────────
+_batch_buffer: list[str] = []
+_batch_lock = asyncio.Lock()
+_batch_task: Optional[asyncio.Task[None]] = None
+_last_flush_time: float = 0.0
+MIN_SEND_INTERVAL = 0.5
+MAX_BATCH_CHARS = 1800  # Discord 限制 2000 字符，留余量
+
+
+async def _flush_batch(channel: discord.abc.Messageable) -> None:
+    """将缓冲区中的通知合并为一条消息发送，确保距上次发送至少 MIN_SEND_INTERVAL 秒。"""
+    global _last_flush_time, _batch_task
+    elapsed = time.time() - _last_flush_time
+    if elapsed < MIN_SEND_INTERVAL:
+        await asyncio.sleep(MIN_SEND_INTERVAL - elapsed)
+
+    async with _batch_lock:
+        _batch_task = None
+        if not _batch_buffer:
+            return
+        messages = _batch_buffer.copy()
+        _batch_buffer.clear()
+
+    _last_flush_time = time.time()
+    # 按 Discord 长度限制拆分发送
+    chunks: list[str] = []
+    current = ""
+    for msg in messages:
+        if current and len(current) + 1 + len(msg) > MAX_BATCH_CHARS:
+            chunks.append(current)
+            current = msg
+        else:
+            current = f"{current}\n{msg}" if current else msg
+    if current:
+        chunks.append(current)
+
+    for chunk in chunks:
+        try:
+            await channel.send(chunk, delete_after=NOTIFY_DELETE_AFTER)
+        except (discord.Forbidden, discord.HTTPException) as exc:
+            print(f"[QuotaDrop] 批量提醒发送失败：{exc}")
+
+
+async def _queue_notification(channel: discord.abc.Messageable, text: str) -> None:
+    """将一条通知加入缓冲区，并确保有刷新任务在运行。"""
+    global _batch_task
+    async with _batch_lock:
+        _batch_buffer.append(text)
+        if _batch_task is None or _batch_task.done():
+            _batch_task = asyncio.create_task(_flush_batch(channel))
+
+
 async def handle_drop_message(client: httpx.AsyncClient, message: discord.Message) -> None:
     """处理一条发言的掉落逻辑（由统一的消息入口调用）。"""
     discord_id = str(message.author.id)
@@ -120,24 +173,18 @@ async def handle_drop_message(client: httpx.AsyncClient, message: discord.Messag
         if current_quota is None:
             return
         print(f"[QuotaDrop] {username} 被扣减 {deduct_amount} 点，当前额度 {current_quota}，冷却 {cooldown_seconds:.0f} 秒")
-        try:
-            await message.channel.send(
-                f"💸 {message.author.mention} 运气不佳，被扣减 {deduct_amount} 点活动额度，当前额度 {current_quota} 点……",
-                delete_after=NOTIFY_DELETE_AFTER,
-            )
-        except (discord.Forbidden, discord.HTTPException) as exc:
-            print(f"[QuotaDrop] 提醒发送失败：{exc}")
+        await _queue_notification(
+            message.channel,
+            f"💸 {message.author.mention} 运气不佳，被扣减 {deduct_amount} 点活动额度，当前额度 {current_quota} 点……",
+        )
         return
 
     if amount == 0:
         print(f"[QuotaDrop] {username} 掉落 0 点，冷却 {cooldown_seconds:.0f} 秒")
-        try:
-            await message.channel.send(
-                f"💨 {message.author.mention} 很遗憾，这次没有掉落额度，下次好运！",
-                delete_after=NOTIFY_DELETE_AFTER,
-            )
-        except (discord.Forbidden, discord.HTTPException) as exc:
-            print(f"[QuotaDrop] 提醒发送失败：{exc}")
+        await _queue_notification(
+            message.channel,
+            f"💨 {message.author.mention} 很遗憾，这次没有掉落额度，下次好运！",
+        )
         return
 
     current_quota = await _call_quota_api(client, "grant", username, amount)
@@ -145,13 +192,10 @@ async def handle_drop_message(client: httpx.AsyncClient, message: discord.Messag
         return
 
     print(f"[QuotaDrop] {username} 掉落 {amount} 点，当前额度 {current_quota}，冷却 {cooldown_seconds:.0f} 秒")
-    try:
-        await message.channel.send(
-            f"🎉 {message.author.mention} 幸运掉落 {amount} 点活动额度，当前额度 {current_quota} 点！",
-            delete_after=NOTIFY_DELETE_AFTER,
-        )
-    except (discord.Forbidden, discord.HTTPException) as exc:
-        print(f"[QuotaDrop] 提醒发送失败：{exc}")
+    await _queue_notification(
+        message.channel,
+        f"🎉 {message.author.mention} 幸运掉落 {amount} 点活动额度，当前额度 {current_quota} 点！",
+    )
 
 
 def start_quota_drop(bot: "SukakaBot") -> httpx.AsyncClient:
