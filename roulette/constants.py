@@ -110,6 +110,13 @@ BANK_LOAN_LENDER_GAIN = 55  # 借款账号实收
 BANK_LOAN_FEE = 5  # 手续费（销毁）
 BANK_LOAN_MIN_LENDER_BALANCE = 100  # 借款账号最低存款
 
+LOTTERY_KEYWORD = "买彩票"
+LOTTERY_COST = 10  # 彩票单价
+LOTTERY_WIN_CHANCE = 0.05  # 中奖概率 5%
+LOTTERY_POOL_CONTRIBUTE = 8  # 未中奖进入奖池的额度（剩余 2 点销毁）
+LOTTERY_BASE_POOL = 50  # 奖池基础额度
+LOTTERY_DB = "lottery.db"
+
 RULES_KEYWORD = "规则"
 
 BIG_RED_PACKET_INTERVAL_SECONDS = 360  # 机器人每 6 分钟发一次大红包

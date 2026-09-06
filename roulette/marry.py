@@ -74,13 +74,20 @@ class MarryView(discord.ui.View):
                     await interaction.response.send_message("结算失败，请稍后再试。", ephemeral=True)
                     return
 
-        share = (total - fee) // 2
-        bonus = (total - fee) % 2  # 奇数时多出 1 点给求婚者
-        p_share = share + bonus
-        q_share = share
+        # 因为爱情：求婚方持有时，获得对方所有额度
+        from roulette.gacha import consume_effect
+        forlove_note = ""
+        if consume_effect(self.proposer.id, "forlove"):
+            p_share, q_share = total - fee, 0
+            forlove_note = f"\n💕 **因为爱情**生效！{self.proposer.mention} 获得对方所有额度！"
+        else:
+            share = (total - fee) // 2
+            bonus = (total - fee) % 2  # 奇数时多出 1 点给求婚者
+            p_share = share + bonus
+            q_share = share
 
-        p_new = await adjust_quota(self.client, "grant", self.proposer.name, p_share)
-        q_new = await adjust_quota(self.client, "grant", self.partner.name, q_share)
+        p_new = await adjust_quota(self.client, "grant", self.proposer.name, p_share) if p_share > 0 else 0
+        q_new = await adjust_quota(self.client, "grant", self.partner.name, q_share) if q_share > 0 else 0
 
         self.completed = True
         for item in self.children:
@@ -89,7 +96,7 @@ class MarryView(discord.ui.View):
 
         result_text = (
             f"💍 **婚礼完成！** {self.proposer.mention} 和 {self.partner.mention} 结为夫妻！\n"
-            f"两人额度合并共 {total} 点，手续费 {fee} 点已销毁，剩余 {total - fee} 点平分。\n"
+            f"两人额度合并共 {total} 点，手续费 {fee} 点已销毁，剩余 {total - fee} 点平分。{forlove_note}\n"
             f"{self.proposer.mention} 分得 **{p_share} 点**（当前 {p_new if p_new is not None else '?'} 点）\n"
             f"{self.partner.mention} 分得 **{q_share} 点**（当前 {q_new if q_new is not None else '?'} 点）"
         )

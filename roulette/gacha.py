@@ -46,10 +46,12 @@ CARD_POOL: dict[str, tuple[str, str, int]] = {
     "avatar": ("天神下凡", "下次抢银行成功率翻倍", 10),
     "selfdestruct": ("自爆", f"额度归零，随机销毁 {GACHA_SELFDESTRUCT_MIN_PERCENT}%-{GACHA_SELFDESTRUCT_MAX_PERCENT}%，剩余生成红包供所有人抢", 10),
     "snake": ("蛇符咒", "排行榜隐身，不会被劫富济贫，效果永久（唯一道具，直到下一个人抽到）", 5),
+    "membership": ("会员卡", "抽卡费用减半、抽卡 CD 减半，效果永久（唯一道具，直到下一个人抽到）", 5),
     "provoke": ("挑衅", "下次发起决斗时对方无法拒绝", 10),
     "error": ("错误", f"额度重置为 {GACHA_ERROR_MIN}-{GACHA_ERROR_MAX} 之间的随机值", 5),
     "retry": ("这把不算", "梭哈或决斗失败后可重来一次", 10),
-    "scapegoat": ("借刀杀人", "下次被抢劫/决斗/诅咒时，随机转嫁给其他人", 10),
+    "scapegoat": ("借刀杀人", "下次被抢劫/诅咒时，随机转嫁给其他人", 10),
+    "forlove": ("因为爱情", "下次结婚时获得对方所有额度", 10),
     "taxevasion": ("偷税漏税", "下次取钱手续费为 0", 10),
     "notyet": ("时候未到", "梭哈归零时自动恢复 50 点", 10),
     "blank": ("空白", "无效果", 40),  # 实际概率由 GACHA_BLANK_CHANCE 控制
@@ -73,6 +75,15 @@ def _init_db() -> None:
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS snake_charm_holder (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                discord_id INTEGER NOT NULL,
+                created_at REAL NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS membership_card_holder (
                 id INTEGER PRIMARY KEY CHECK (id = 1),
                 discord_id INTEGER NOT NULL,
                 created_at REAL NOT NULL
@@ -108,6 +119,35 @@ def get_snake_charm_holder() -> Optional[int]:
 def has_snake_charm(discord_id: int) -> bool:
     """是否持有蛇符咒（唯一道具）。"""
     return get_snake_charm_holder() == discord_id
+
+
+def set_membership_card_holder(discord_id: int) -> None:
+    """设置会员卡唯一持有者（覆盖旧持有者）。"""
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute(
+            """
+            INSERT INTO membership_card_holder (id, discord_id, created_at)
+            VALUES (1, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                discord_id = excluded.discord_id,
+                created_at = excluded.created_at
+            """,
+            (discord_id, time.time()),
+        )
+
+
+def get_membership_card_holder() -> Optional[int]:
+    """查询当前会员卡持有者，无持有者返回 None。"""
+    with sqlite3.connect(DB_PATH) as conn:
+        row = conn.execute(
+            "SELECT discord_id FROM membership_card_holder WHERE id = 1"
+        ).fetchone()
+    return row[0] if row else None
+
+
+def has_membership_card(discord_id: int) -> bool:
+    """是否持有会员卡（唯一道具）。"""
+    return get_membership_card_holder() == discord_id
 
 
 def _draw_card(exclude: Optional[set[str]] = None) -> str:
@@ -208,7 +248,12 @@ async def handle_gacha(
     if quota is None:
         await message.channel.send("🎴 查询额度失败，请稍后再试。")
         return
+
+    # 会员卡：费用减半、CD 减半
+    is_member = has_membership_card(message.author.id)
     cost = max(GACHA_MIN_COST, int(quota * GACHA_COST_PERCENT / 100))
+    if is_member:
+        cost = max(1, cost // 2)
     if quota < cost:
         await message.channel.send(
             f"🎴 额度不足：当前 {quota} 点，抽卡需要 {cost} 点（额度的 {GACHA_COST_PERCENT}%，最低 {GACHA_MIN_COST} 点）。"
@@ -220,7 +265,8 @@ async def handle_gacha(
         await message.channel.send("🎴 扣除额度失败，请稍后再试。")
         return
 
-    gacha_cooldowns[message.author.id] = now + GACHA_COOLDOWN_SECONDS
+    cooldown = GACHA_COOLDOWN_SECONDS // 2 if is_member else GACHA_COOLDOWN_SECONDS
+    gacha_cooldowns[message.author.id] = now + cooldown
 
     # 十连抽生效：自动抽十次
     if consume_effect(message.author.id, "multidraw"):
@@ -260,6 +306,19 @@ async def handle_gacha(
         )
         return
 
+    # 会员卡：唯一道具，立即替换持有者
+    if card_key == "membership":
+        old_holder = get_membership_card_holder()
+        set_membership_card_holder(message.author.id)
+        transfer_note = ""
+        if old_holder and old_holder != message.author.id:
+            transfer_note = f"\n💳 会员卡已从 <@{old_holder}> 手中转移！"
+        await message.channel.send(
+            f"🎴 {message.author.mention} 消耗 {cost} 点抽卡……\n"
+            f"💳 **{name}**！{desc}。{transfer_note}"
+        )
+        return
+
     # 错误：立即结算，额度重置为随机值
     if card_key == "error":
         await _settle_error(message, client)
@@ -294,6 +353,13 @@ async def _handle_multidraw(message: discord.Message, client: httpx.AsyncClient,
             set_snake_charm_holder(message.author.id)
             transfer_note = f"（从 <@{old_holder}> 手中转移）" if old_holder and old_holder != message.author.id else ""
             lines.append(f"{i+1}. 🐍 **{name}**！{desc}{transfer_note}")
+            continue
+
+        if card_key == "membership":
+            old_holder = get_membership_card_holder()
+            set_membership_card_holder(message.author.id)
+            transfer_note = f"（从 <@{old_holder}> 手中转移）" if old_holder and old_holder != message.author.id else ""
+            lines.append(f"{i+1}. 💳 **{name}**！{desc}{transfer_note}")
             continue
 
         if card_key == "error":
@@ -485,17 +551,23 @@ async def handle_seduce(
                 await message.channel.send("💘 结算失败，请稍后再试。")
                 return
 
-    share = (total - fee) // 2
-    bonus = (total - fee) % 2
-    p_share = share + bonus
-    q_share = share
+    # 因为爱情：被诱惑方持有时，获得对方（诱惑方）所有额度
+    forlove_note = ""
+    if consume_effect(partner.id, "forlove"):
+        p_share, q_share = 0, total - fee
+        forlove_note = f"\n💕 **因为爱情**生效！{partner.mention} 获得对方所有额度！"
+    else:
+        share = (total - fee) // 2
+        bonus = (total - fee) % 2
+        p_share = share + bonus
+        q_share = share
 
-    p_new = await adjust_quota(client, "grant", message.author.name, p_share)
-    q_new = await adjust_quota(client, "grant", partner.name, q_share)
+    p_new = await adjust_quota(client, "grant", message.author.name, p_share) if p_share > 0 else 0
+    q_new = await adjust_quota(client, "grant", partner.name, q_share) if q_share > 0 else 0
 
     await message.channel.send(
         f"💘 {message.author.mention} 对 {partner.mention} 使用诱惑……\n"
-        f"💍 **强制结婚成功！** 两人额度合并共 {total} 点，手续费 {fee} 点已销毁。\n"
+        f"💍 **强制结婚成功！** 两人额度合并共 {total} 点，手续费 {fee} 点已销毁。{forlove_note}\n"
         f"{message.author.mention} 分得 **{p_share} 点**（当前 {p_new if p_new is not None else '?'} 点）\n"
         f"{partner.mention} 分得 **{q_share} 点**（当前 {q_new if q_new is not None else '?'} 点）"
     )

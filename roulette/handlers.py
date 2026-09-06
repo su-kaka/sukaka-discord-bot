@@ -46,6 +46,7 @@ from roulette.constants import (
     GACHA_KEYWORD,
     GACHA_NOTYET_RECOVER,
     LEADERBOARD_KEYWORD,
+    LOTTERY_KEYWORD,
     MARRY_COOLDOWN_SECONDS,
     MY_CARDS_KEYWORD,
     MARRY_FEE_PERCENT,
@@ -71,6 +72,7 @@ from roulette.dice_game import DiceGame
 from roulette.duel import DuelView
 from roulette.gacha import consume_effect, handle_gacha, handle_my_cards, handle_seduce
 from roulette.leaderboard import handle_leaderboard
+from roulette.lottery import handle_lottery
 from roulette.marry import MarryView
 from roulette.red_packet import RedPacketView
 from roulette.rob import handle_rob
@@ -236,6 +238,11 @@ def start_roulette(bot: "SukakaBot") -> None:
             await handle_bank_heist(message, client, heist_cooldowns)
             return
 
+        # 买彩票：10 点一张，5% 概率赢走全部奖池
+        if content == LOTTERY_KEYWORD:
+            await handle_lottery(message, client)
+            return
+
         # 规则：回复整套游戏规则
         if content == RULES_KEYWORD:
             rules = (
@@ -248,13 +255,14 @@ def start_roulette(bot: "SukakaBot") -> None:
                 "💍 **结婚**：两人额度合并，扣 10% 手续费（最低 10 点），剩余平分。\n"
                 "🔮 **诅咒**：押 10 点，被诅咒者下次抢劫必被反杀、决斗必输。\n"
                 "🎰 **梭哈**：押全部额度，50% 翻倍（一念天堂翻四倍），成功后扣 20% 手续费，失败清零。\n"
-                "🎴 **抽卡**：押额度的 10%（最少 10 点），50% 空白，其余获得魔法卡（含天神下凡：下次抢银行成功率翻倍；蛇符咒：排行榜隐身+免疫劫富济贫，唯一道具；挑衅：决斗无法拒绝；错误：额度重置为 1-1000 随机值；这把不算！：梭哈/决斗失败可重来；借刀杀人：被抢/决斗/诅咒时转嫁他人；偷税漏税：取钱手续费为 0；时候未到！：梭哈归零恢复 50 点）。\n"
+                "🎴 **抽卡**：押额度的 10%（最少 10 点），50% 空白，其余获得随机魔法卡或者道具。\n"
                 "🏦 **地精银行**：发送「存钱」押 50%（最低 10 点），发送「取钱」随机扣 1%-50% 手续费。存款超 1000 点解锁普通安保（防抢劫），超 2000 点解锁皇家安保（防抢劫/诱惑/劫富济贫）。\n"
                 "💳 **贷款**：发送「贷款」随机向存款 ≥ 100 点的用户借款 50 点，需还 60 点（借款账号得 55 点：50 本金 + 5 利息，5 点手续费销毁）。未还清前无法再次贷款，存钱时优先偿还贷款。\n"
                 "🏦💰 **抢银行**：三人组队抢银行，随机选 1-5 个存款 ≥ 500 的目标，装备总和决定成功率（跑刀+5%/起枪+15%/全甲+30%），成功返还投入+收益，失败损失投入。\n"
                 "💥 **自爆**：额度归零，随机销毁 25%-50%，剩余生成红包。\n"
                 "🧧🧧 **大红包**：机器人每 6 分钟发 500 点，最多 10 人抢，每人 0-250 点。\n"
-                "🏆 **排行榜**：展示活动额度前十用户。"
+                "�️ **买彩票**：10 点一张，5% 概率赢走全部奖池，未中奖 8 点进奖池（2 点销毁），奖池基础 50 点。\n"
+                "�🏆 **排行榜**：展示活动额度前十用户。"
             )
             await message.channel.send(rules)
             return
@@ -298,13 +306,17 @@ def start_roulette(bot: "SukakaBot") -> None:
 
             # 这把不算！：失败后可重来一次
             has_retry = consume_effect(message.author.id, "retry")
-            retry_note = "\n🔄 这把不算！生效！失败后可以重来一次！" if has_retry else ""
+            retry_note = ""
 
             success = random.random() < success_chance
             if not success and has_retry:
                 # 重来一次
-                success = random.random() < success_chance
-                retry_note += "\n🔄 重来一次！"
+                retry_success = random.random() < success_chance
+                retry_note = (
+                    f"\n🔄 **这把不算！**生效！第一次判定：❌ 失败……"
+                    f"\n🔄 重新判定：{'✅ 成功！' if retry_success else '❌ 仍然失败！'}"
+                )
+                success = retry_success
 
             if success:
                 multiplier = 4 if heaven else 2
