@@ -81,8 +81,8 @@ BANK_DEPOSIT_PERCENT = 50  # 存入额度比例（%）
 BANK_WITHDRAW_MIN_PERCENT = 10  # 取钱扣除比例下限（%）
 BANK_WITHDRAW_MAX_PERCENT = 50  # 取钱扣除比例上限（%）
 BANK_DB = "bank.db"
-BANK_SECURITY_THRESHOLD = 2500  # 存款超过此值解锁普通安保：无法被抢劫
-BANK_ROYAL_SECURITY_THRESHOLD = 5000  # 存款超过此值解锁皇家安保：无法被抢劫、诱惑、劫富济贫
+BANK_SECURITY_THRESHOLD = 1000  # 存款超过此值解锁普通安保：无法被抢劫
+BANK_ROYAL_SECURITY_THRESHOLD = 2000  # 存款超过此值解锁皇家安保：无法被抢劫、诱惑、劫富济贫
 
 BANK_HEIST_KEYWORD = "抢银行"
 BANK_HEIST_TEAM_SIZE = 3  # 组队人数
