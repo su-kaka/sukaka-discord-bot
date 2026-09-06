@@ -20,13 +20,13 @@ DEFAULT_API_BASE = "https://catiecli.sukaka.top"
 DB_PATH = Path(os.getenv("QUOTA_DROP_DB", "quota_drops.db"))
 
 DROP_MIN = 0
-DROP_MAX = 20
+DROP_MAX = 100
 # 掉落 0 点的概率（0-1），默认 30%；剩余概率由 1-20 点均匀平分
 DROP_ZERO_CHANCE = float(os.getenv("QUOTA_DROP_ZERO_CHANCE", "0.3"))
 # 触发扣减事件的概率（0-1），默认 10%
 DEDUCT_CHANCE = float(os.getenv("QUOTA_DEDUCT_CHANCE", "0.1"))
 DEDUCT_MIN = 1
-DEDUCT_MAX = 20
+DEDUCT_MAX = 100
 COOLDOWN_MIN_SECONDS = int(os.getenv("QUOTA_DROP_COOLDOWN_MIN", "30"))
 COOLDOWN_MAX_SECONDS = int(os.getenv("QUOTA_DROP_COOLDOWN_MAX", "180"))
 NOTIFY_DELETE_AFTER = 10
