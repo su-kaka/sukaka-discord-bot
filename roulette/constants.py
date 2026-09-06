@@ -95,8 +95,7 @@ BANK_HEIST_MAX_TARGETS = 5  # 最多目标数
 BANK_HEIST_BASE_SUCCESS = 10  # 基础成功率（%）
 BANK_HEIST_PROFIT_SHARE = 70  # 队员分配比例（%）
 BANK_HEIST_GEAR_NAMES = {"knife": "跑刀", "gun": "起枪", "armor": "全甲"}
-BANK_HEIST_GEAR_COST = {"knife": 10, "gun": 50, "armor": 100}  # 装备固定投入（点）
-BANK_HEIST_GEAR_MIN_QUOTA = {"knife": 10, "gun": 50, "armor": 100}  # 装备最低额度
+BANK_HEIST_GEAR_COST = {"knife": 10, "gun": 50, "armor": 100}  # 装备固定投入（点），同时作为最低额度门槛
 BANK_HEIST_GEAR_COEFFICIENTS = {"knife": 1, "gun": 5, "armor": 10}  # 收益系数
 BANK_HEIST_GEAR_SUCCESS_BONUS = {"knife": 5, "gun": 15, "armor": 30}  # 成功率加成（%）
 

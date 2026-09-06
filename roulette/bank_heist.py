@@ -22,7 +22,6 @@ from roulette.constants import (
     BANK_HEIST_COOLDOWN_SECONDS,
     BANK_HEIST_GEAR_COEFFICIENTS,
     BANK_HEIST_GEAR_COST,
-    BANK_HEIST_GEAR_MIN_QUOTA,
     BANK_HEIST_GEAR_NAMES,
     BANK_HEIST_GEAR_SUCCESS_BONUS,
     BANK_HEIST_JOIN_TIMEOUT_SECONDS,
@@ -86,9 +85,9 @@ class BankHeistView(discord.ui.View):
         quota = await query_quota(self.client, user.name)
         if quota is None:
             return "查询额度失败，请稍后再试。"
-        min_quota = BANK_HEIST_GEAR_MIN_QUOTA[gear_key]
-        if quota < min_quota:
-            return f"额度不足：当前 {quota} 点，{self._gear_display(gear_key)} 需要至少 {min_quota} 点。"
+        cost = BANK_HEIST_GEAR_COST[gear_key]
+        if quota < cost:
+            return f"额度不足：当前 {quota} 点，{self._gear_display(gear_key)} 需要至少 {cost} 点。"
         return None
 
     async def _deduct_gear_cost(self, user: discord.Member | discord.User, gear_key: str) -> Optional[int]:
@@ -317,9 +316,9 @@ async def handle_bank_heist(
     if quota is None:
         await message.channel.send("🏦 查询额度失败，请稍后再试。")
         return
-    if quota < BANK_HEIST_GEAR_MIN_QUOTA["knife"]:
+    if quota < BANK_HEIST_GEAR_COST["knife"]:
         await message.channel.send(
-            f"🏦 额度不足：当前 {quota} 点，跑刀需要至少 {BANK_HEIST_GEAR_MIN_QUOTA['knife']} 点。"
+            f"🏦 额度不足：当前 {quota} 点，跑刀需要至少 {BANK_HEIST_GEAR_COST['knife']} 点。"
         )
         return
 
