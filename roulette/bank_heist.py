@@ -15,7 +15,6 @@ from roulette.bank import (
     get_all_accounts_with_min_balance,
     mark_heist_cooldown,
     set_hatred,
-    has_hatred,
 )
 from roulette.gacha import consume_effect
 from roulette.constants import (
@@ -31,7 +30,6 @@ from roulette.constants import (
     BANK_HEIST_MIN_BALANCE,
     BANK_HEIST_MIN_TARGETS,
     BANK_HEIST_PROFIT_SHARE,
-    BANK_HEIST_TARGET_COOLDOWN_SECONDS,
     BANK_HEIST_TEAM_SIZE,
 )
 
@@ -184,11 +182,16 @@ class BankHeistView(discord.ui.View):
 
         success_rate = min(success_rate, 95)  # 上限 95%
 
-        # 随机选取 1-3 个目标
-        targets = get_all_accounts_with_min_balance(BANK_HEIST_MIN_BALANCE)
+        # 随机选取 1-3 个目标（排除发起人和队员自己的银行账户）
+        member_ids = {self.leader.id} | {user.id for user, _ in self.members}
+        targets = [
+            (discord_id, balance)
+            for discord_id, balance in get_all_accounts_with_min_balance(BANK_HEIST_MIN_BALANCE)
+            if discord_id not in member_ids
+        ]
         if not targets:
             await self.message.channel.send(
-                f"🏦 抢银行失败：没有存款 ≥ {BANK_HEIST_MIN_BALANCE} 的目标。"
+                f"🏦 抢银行失败：没有存款 ≥ {BANK_HEIST_MIN_BALANCE} 的目标（不能抢自己的银行）。"
             )
             await self._refund_all()
             return
