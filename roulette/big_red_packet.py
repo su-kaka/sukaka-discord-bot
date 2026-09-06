@@ -23,7 +23,7 @@ if TYPE_CHECKING:
 
 
 class BigRedPacketView(PacketView):
-    """机器人大红包：1000 点奖池，最多 10 人抢，每人随机 0-500 点。"""
+    """机器人大红包：500 点奖池，最多 10 人抢，每人随机 0-250 点。"""
 
     def __init__(self, client: httpx.AsyncClient) -> None:
         super().__init__(
