@@ -21,7 +21,7 @@ from roulette.constants import (
     BANK_HEIST_BASE_SUCCESS,
     BANK_HEIST_COOLDOWN_SECONDS,
     BANK_HEIST_GEAR_COEFFICIENTS,
-    BANK_HEIST_GEAR_COST_PERCENT,
+    BANK_HEIST_GEAR_COST,
     BANK_HEIST_GEAR_MIN_QUOTA,
     BANK_HEIST_GEAR_NAMES,
     BANK_HEIST_GEAR_SUCCESS_BONUS,
@@ -92,12 +92,8 @@ class BankHeistView(discord.ui.View):
         return None
 
     async def _deduct_gear_cost(self, user: discord.Member | discord.User, gear_key: str) -> Optional[int]:
-        """扣除装备投入，返回扣除金额或 None。"""
-        quota = await query_quota(self.client, user.name)
-        if quota is None:
-            return None
-        cost_percent = BANK_HEIST_GEAR_COST_PERCENT[gear_key]
-        cost = max(1, int(quota * cost_percent / 100))
+        """扣除装备固定投入，返回扣除金额或 None。"""
+        cost = BANK_HEIST_GEAR_COST[gear_key]
         result = await adjust_quota(self.client, "deduct", user.name, cost)
         if result is None:
             return None
