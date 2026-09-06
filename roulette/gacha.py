@@ -20,6 +20,8 @@ from roulette.constants import (
     GACHA_COOLDOWN_SECONDS,
     GACHA_COST_PERCENT,
     GACHA_DB,
+    GACHA_ERROR_MAX,
+    GACHA_ERROR_MIN,
     GACHA_MIN_COST,
     GACHA_SEDUCE_SUCCESS_CHANCE,
     GACHA_SELFDESTRUCT_MAX_PERCENT,
@@ -43,12 +45,19 @@ CARD_POOL: dict[str, tuple[str, str, int]] = {
     "multidraw": ("十连抽", "下次抽卡自动抽十次", 10),
     "avatar": ("天神下凡", "下次抢银行成功率翻倍", 10),
     "selfdestruct": ("自爆", f"额度归零，随机销毁 {GACHA_SELFDESTRUCT_MIN_PERCENT}%-{GACHA_SELFDESTRUCT_MAX_PERCENT}%，剩余生成红包供所有人抢", 10),
+    "snake": ("蛇符咒", "排行榜隐身，不会被劫富济贫，效果永久（唯一道具，直到下一个人抽到）", 5),
+    "provoke": ("挑衅", "下次发起决斗时对方无法拒绝", 10),
+    "error": ("错误", f"额度重置为 {GACHA_ERROR_MIN}-{GACHA_ERROR_MAX} 之间的随机值", 5),
+    "retry": ("这把不算！", "梭哈或决斗失败后可重来一次", 10),
+    "scapegoat": ("借刀杀人", "下次被抢劫/决斗/诅咒时，随机转嫁给其他人", 10),
+    "taxevasion": ("偷税漏税", "下次取钱手续费为 0", 10),
+    "notyet": ("时候未到！", "梭哈归零时自动恢复 50 点", 10),
     "blank": ("空白", "无效果", 40),  # 实际概率由 GACHA_BLANK_CHANCE 控制
 }
 
 
 def _init_db() -> None:
-    """建表：用户卡牌效果。"""
+    """建表：用户卡牌效果 + 蛇符咒唯一持有者。"""
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute(
             """
@@ -61,6 +70,44 @@ def _init_db() -> None:
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS snake_charm_holder (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                discord_id INTEGER NOT NULL,
+                created_at REAL NOT NULL
+            )
+            """
+        )
+
+
+def set_snake_charm_holder(discord_id: int) -> None:
+    """设置蛇符咒唯一持有者（覆盖旧持有者）。"""
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute(
+            """
+            INSERT INTO snake_charm_holder (id, discord_id, created_at)
+            VALUES (1, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                discord_id = excluded.discord_id,
+                created_at = excluded.created_at
+            """,
+            (discord_id, time.time()),
+        )
+
+
+def get_snake_charm_holder() -> Optional[int]:
+    """查询当前蛇符咒持有者，无持有者返回 None。"""
+    with sqlite3.connect(DB_PATH) as conn:
+        row = conn.execute(
+            "SELECT discord_id FROM snake_charm_holder WHERE id = 1"
+        ).fetchone()
+    return row[0] if row else None
+
+
+def has_snake_charm(discord_id: int) -> bool:
+    """是否持有蛇符咒（唯一道具）。"""
+    return get_snake_charm_holder() == discord_id
 
 
 def _draw_card(exclude: Optional[set[str]] = None) -> str:
@@ -200,6 +247,24 @@ async def handle_gacha(
         await _settle_selfdestruct(message, client)
         return
 
+    # 蛇符咒：唯一道具，立即替换持有者
+    if card_key == "snake":
+        old_holder = get_snake_charm_holder()
+        set_snake_charm_holder(message.author.id)
+        transfer_note = ""
+        if old_holder and old_holder != message.author.id:
+            transfer_note = f"\n🐍 蛇符咒已从 <@{old_holder}> 手中转移！"
+        await message.channel.send(
+            f"🎴 {message.author.mention} 消耗 {cost} 点抽卡……\n"
+            f"🐍 **{name}**！{desc}。{transfer_note}"
+        )
+        return
+
+    # 错误：立即结算，额度重置为随机值
+    if card_key == "error":
+        await _settle_error(message, client)
+        return
+
     # 所有卡牌均只生效 1 次
     _add_effect(message.author.id, card_key, 1)
     await message.channel.send(
@@ -224,10 +289,46 @@ async def _handle_multidraw(message: discord.Message, client: httpx.AsyncClient,
             await _settle_robinhood(message, client)
             continue
 
+        if card_key == "snake":
+            old_holder = get_snake_charm_holder()
+            set_snake_charm_holder(message.author.id)
+            transfer_note = f"（从 <@{old_holder}> 手中转移）" if old_holder and old_holder != message.author.id else ""
+            lines.append(f"{i+1}. 🐍 **{name}**！{desc}{transfer_note}")
+            continue
+
+        if card_key == "error":
+            lines.append(f"{i+1}. 💥 **{name}**！立即结算……")
+            await _settle_error(message, client)
+            continue
+
         _add_effect(message.author.id, card_key, 1)
         lines.append(f"{i+1}. ✨ **{name}**！{desc}")
 
     await message.channel.send("\n".join(lines))
+
+
+async def _settle_error(message: discord.Message, client: httpx.AsyncClient) -> None:
+    """错误：将额度重置为 1-1000 之间的随机值。"""
+    quota = await query_quota(client, message.author.name)
+    if quota is None:
+        await message.channel.send("🎴 查询额度失败，请稍后再试。")
+        return
+
+    new_quota = random.randint(GACHA_ERROR_MIN, GACHA_ERROR_MAX)
+    if quota > 0:
+        result = await adjust_quota(client, "deduct", message.author.name, quota)
+        if result is None:
+            await message.channel.send("🎴 扣除额度失败，请稍后再试。")
+            return
+    granted = await adjust_quota(client, "grant", message.author.name, new_quota)
+    if granted is None:
+        await message.channel.send("🎴 额度重置失败，请联系管理员。")
+        return
+
+    await message.channel.send(
+        f"🎴 {message.author.mention} 抽中 **错误**！\n"
+        f"💥 额度从 **{quota} 点** 重置为 **{new_quota} 点**！"
+    )
 
 
 async def _settle_robinhood(message: discord.Message, client: httpx.AsyncClient) -> None:
@@ -253,6 +354,9 @@ async def _settle_robinhood(message: discord.Message, client: httpx.AsyncClient)
                 )
             if member and has_royal_security_service(member.id):
                 lines.append(f"👑 {username} 有皇家安保，无法被劫富济贫！")
+                continue
+            if member and has_snake_charm(member.id):
+                lines.append(f"🐍 {username} 持有蛇符咒，无法被劫富济贫！")
                 continue
         amount = random.randint(1, 10)
         stolen = min(int(quota * amount / 100), quota)

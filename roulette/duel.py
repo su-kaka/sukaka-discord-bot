@@ -22,6 +22,7 @@ class DuelView(discord.ui.View):
         client: httpx.AsyncClient,
         on_finish: Optional[object] = None,
         cursed_users: Optional[set[int]] = None,
+        provoked: bool = False,
     ) -> None:
         super().__init__(timeout=DUEL_TIMEOUT_SECONDS)
         self.challenger = challenger
@@ -31,6 +32,10 @@ class DuelView(discord.ui.View):
         self.completed = False
         self._on_finish = on_finish
         self._cursed_users = cursed_users if cursed_users is not None else set()
+        self._provoked = provoked
+        if provoked:
+            # 挑衅生效：移除拒绝按钮
+            self.remove_item(self.decline_button)
 
     def _finish(self) -> None:
         if callable(self._on_finish):
@@ -93,6 +98,26 @@ class DuelView(discord.ui.View):
         while c_roll == o_roll:
             c_roll, o_roll = random.randint(1, 100), random.randint(1, 100)
 
+        # 借刀杀人：被决斗时随机转嫁给别人（从银行存款用户中选）
+        from roulette.gacha import consume_effect
+        from roulette.bank import get_all_accounts_with_min_balance
+        scapegoat_note = ""
+        if consume_effect(self.opponent.id, "scapegoat"):
+            accounts = get_all_accounts_with_min_balance(1)
+            candidates = [
+                uid for uid, _ in accounts
+                if uid != self.opponent.id and uid != self.challenger.id
+            ]
+            if candidates:
+                scapegoat_id = random.choice(candidates)
+                # 尝试从 guild 获取成员对象
+                scapegoat = None
+                if self.message and self.message.guild:
+                    scapegoat = self.message.guild.get_member(scapegoat_id)
+                if scapegoat:
+                    scapegoat_note = f"\n🎭 借刀杀人！{self.opponent.mention} 将决斗转嫁给了 {scapegoat.mention}！"
+                    self.opponent = scapegoat
+
         # 诅咒生效：被诅咒者决斗必输
         curse_note = ""
         c_cursed = self.challenger.id in self._cursed_users
@@ -108,6 +133,18 @@ class DuelView(discord.ui.View):
         else:
             winner, loser = (self.challenger, self.opponent) if c_roll > o_roll else (self.opponent, self.challenger)
 
+        # 这把不算！：败方可重来一次
+        loser_retry = consume_effect(loser.id, "retry")
+        retry_note = ""
+        if loser_retry:
+            # 重新 roll
+            c_roll2, o_roll2 = random.randint(1, 100), random.randint(1, 100)
+            while c_roll2 == o_roll2:
+                c_roll2, o_roll2 = random.randint(1, 100), random.randint(1, 100)
+            # 重新判定胜负（不考虑诅咒，因为诅咒已消耗）
+            winner, loser = (self.challenger, self.opponent) if c_roll2 > o_roll2 else (self.opponent, self.challenger)
+            retry_note = f"\n🔄 这把不算！生效！{loser.mention} 要求重来！\n重 roll：{self.challenger.mention} **{c_roll2}** vs {self.opponent.mention} **{o_roll2}**"
+
         gross_prize = stake * 2
         fee = int(gross_prize * DUEL_FEE_PERCENT / 100)
         prize = gross_prize - fee
@@ -116,7 +153,7 @@ class DuelView(discord.ui.View):
             f"⚔️ **决斗结果**\n"
             f"{self.challenger.mention} rolled **{c_roll}**\n"
             f"{self.opponent.mention} rolled **{o_roll}**\n"
-            f"{curse_note}"
+            f"{scapegoat_note}{curse_note}{retry_note}"
         )
         if new_quota is None:
             result_text += f"🏆 {winner.mention} 获胜！但奖金发放失败，请联系管理员手动补发 {prize} 点。"

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import random
 import time
 
 import discord
@@ -57,8 +58,27 @@ async def handle_curse(
         return
 
     curse_cooldowns[message.author.id] = now + CURSE_COOLDOWN_SECONDS
+
+    # 借刀杀人：被诅咒时随机转嫁给别人（从银行存款用户中选）
+    from roulette.gacha import consume_effect
+    from roulette.bank import get_all_accounts_with_min_balance
+    scapegoat_note = ""
+    if consume_effect(target.id, "scapegoat"):
+        # 从有存款的用户中随机选一个替罪羊（排除自己和诅咒者）
+        accounts = get_all_accounts_with_min_balance(1)
+        candidates = [
+            uid for uid, _ in accounts
+            if uid != target.id and uid != message.author.id
+        ]
+        if candidates:
+            scapegoat_id = random.choice(candidates)
+            scapegoat = message.guild.get_member(scapegoat_id) if message.guild else None
+            if scapegoat:
+                scapegoat_note = f"\n🎭 借刀杀人！{target.mention} 将诅咒转嫁给了 {scapegoat.mention}！"
+                target = scapegoat
+
     cursed_users.add(target.id)
     await message.channel.send(
         f"🔮 {message.author.mention} 诅咒了 {target.mention}！\n"
-        f"{target.mention} 下次抢劫必被反杀、决斗必输（生效一次后解除）。"
+        f"{target.mention} 下次抢劫必被反杀、决斗必输（生效一次后解除）。{scapegoat_note}"
     )

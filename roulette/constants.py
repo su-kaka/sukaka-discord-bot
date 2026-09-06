@@ -70,6 +70,9 @@ GACHA_DB = "gacha.db"
 GACHA_SEDUCE_SUCCESS_CHANCE = 0.5  # 诱惑成功概率
 GACHA_SELFDESTRUCT_MIN_PERCENT = 25  # 自爆销毁比例下限（%）
 GACHA_SELFDESTRUCT_MAX_PERCENT = 50  # 自爆销毁比例上限（%）
+GACHA_ERROR_MIN = 1  # 错误卡重置额度下限
+GACHA_ERROR_MAX = 1000  # 错误卡重置额度上限
+GACHA_NOTYET_RECOVER = 50  # 时候未到！恢复额度
 SEDUCE_KEYWORD = "诱惑"
 MY_CARDS_KEYWORD = "我的卡牌"
 

@@ -358,8 +358,17 @@ async def handle_withdraw(message: discord.Message, client: httpx.AsyncClient) -
         await message.channel.send("🏦 你在地精银行没有存款。")
         return
 
-    fee_percent = random.randint(BANK_WITHDRAW_MIN_PERCENT, BANK_WITHDRAW_MAX_PERCENT)
-    fee = int(balance * fee_percent / 100)
+    # 偷税漏税：手续费为 0
+    from roulette.gacha import consume_effect
+    taxevasion = consume_effect(message.author.id, "taxevasion")
+    if taxevasion:
+        fee_percent = 0
+        fee = 0
+        tax_note = "\n💰 偷税漏税生效！手续费为 0！"
+    else:
+        fee_percent = random.randint(BANK_WITHDRAW_MIN_PERCENT, BANK_WITHDRAW_MAX_PERCENT)
+        fee = int(balance * fee_percent / 100)
+        tax_note = ""
     amount = balance - fee
 
     # 清零银行账户
@@ -377,7 +386,7 @@ async def handle_withdraw(message: discord.Message, client: httpx.AsyncClient) -
 
     await message.channel.send(
         f"🏦 {message.author.mention} 从地精银行取出 **{balance} 点**！\n"
-        f"手续费 **{fee} 点**（{fee_percent}%），实得 **{amount} 点**，当前额度：**{new_quota} 点**。"
+        f"手续费 **{fee} 点**（{fee_percent}%），实得 **{amount} 点**，当前额度：**{new_quota} 点**。{tax_note}"
     )
 
 

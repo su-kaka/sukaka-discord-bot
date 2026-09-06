@@ -44,6 +44,7 @@ from roulette.constants import (
     DUEL_MIN_QUOTA,
     DUEL_TIMEOUT_SECONDS,
     GACHA_KEYWORD,
+    GACHA_NOTYET_RECOVER,
     LEADERBOARD_KEYWORD,
     MARRY_COOLDOWN_SECONDS,
     MY_CARDS_KEYWORD,
@@ -177,11 +178,15 @@ def start_roulette(bot: "SukakaBot") -> None:
             def _duel_cooldown(user_id: int = message.author.id) -> None:
                 duel_cooldowns[user_id] = time.monotonic() + DUEL_COOLDOWN_SECONDS
 
-            view = DuelView(message.author, opponent, client, on_finish=_duel_cooldown, cursed_users=cursed_users)
+            # 挑衅卡生效：对方无法拒绝
+            provoked = consume_effect(message.author.id, "provoke")
+            provoke_note = "\n😡 挑衅生效！对方无法拒绝这场决斗！" if provoked else ""
+
+            view = DuelView(message.author, opponent, client, on_finish=_duel_cooldown, cursed_users=cursed_users, provoked=provoked)
             view.message = await message.channel.send(
                 f"⚔️ {message.author.mention} 向 {opponent.mention} 发起决斗！\n"
                 f"双方押上额度最少者的全部额度，赢家获得 80%（{DUEL_FEE_PERCENT}% 手续费销毁）。\n"
-                f"{opponent.mention} 请在 {DUEL_TIMEOUT_SECONDS} 秒内接受或拒绝。",
+                f"{opponent.mention} 请在 {DUEL_TIMEOUT_SECONDS} 秒内接受或拒绝。{provoke_note}",
                 view=view,
             )
             return
@@ -243,7 +248,7 @@ def start_roulette(bot: "SukakaBot") -> None:
                 "💍 **结婚**：两人额度合并，扣 10% 手续费（最低 10 点），剩余平分。\n"
                 "🔮 **诅咒**：押 10 点，被诅咒者下次抢劫必被反杀、决斗必输。\n"
                 "🎰 **梭哈**：押全部额度，50% 翻倍（一念天堂翻四倍），成功后扣 20% 手续费，失败清零。\n"
-                "🎴 **抽卡**：押额度的 10%（最少 10 点），50% 空白，其余获得魔法卡（含天神下凡：下次抢银行成功率翻倍）。\n"
+                "🎴 **抽卡**：押额度的 10%（最少 10 点），50% 空白，其余获得魔法卡（含天神下凡：下次抢银行成功率翻倍；蛇符咒：排行榜隐身+免疫劫富济贫，唯一道具；挑衅：决斗无法拒绝；错误：额度重置为 1-1000 随机值；这把不算！：梭哈/决斗失败可重来；借刀杀人：被抢/决斗/诅咒时转嫁他人；偷税漏税：取钱手续费为 0；时候未到！：梭哈归零恢复 50 点）。\n"
                 "🏦 **地精银行**：发送「存钱」押 50%（最低 10 点），发送「取钱」随机扣 1%-50% 手续费。存款超 1000 点解锁普通安保（防抢劫），超 2000 点解锁皇家安保（防抢劫/诱惑/劫富济贫）。\n"
                 "💳 **贷款**：发送「贷款」随机向存款 ≥ 100 点的用户借款 50 点，需还 60 点（借款账号得 55 点：50 本金 + 5 利息，5 点手续费销毁）。未还清前无法再次贷款，存钱时优先偿还贷款。\n"
                 "🏦💰 **抢银行**：三人组队抢银行，随机选 1-5 个存款 ≥ 500 的目标，装备总和决定成功率（跑刀+5%/起枪+15%/全甲+30%），成功返还投入+收益，失败损失投入。\n"
@@ -290,7 +295,18 @@ def start_roulette(bot: "SukakaBot") -> None:
             # 一念天堂生效：成功概率提升到 75%，成功翻四倍
             heaven = consume_effect(message.author.id, "heaven")
             success_chance = 0.75 if heaven else 0.5
-            if random.random() < success_chance:
+
+            # 这把不算！：失败后可重来一次
+            has_retry = consume_effect(message.author.id, "retry")
+            retry_note = "\n🔄 这把不算！生效！失败后可以重来一次！" if has_retry else ""
+
+            success = random.random() < success_chance
+            if not success and has_retry:
+                # 重来一次
+                success = random.random() < success_chance
+                retry_note += "\n🔄 重来一次！"
+
+            if success:
                 multiplier = 4 if heaven else 2
                 gross_prize = stake * multiplier
                 fee = int(gross_prize * ALLIN_FEE_PERCENT / 100)
@@ -305,13 +321,20 @@ def start_roulette(bot: "SukakaBot") -> None:
                     return
                 await message.channel.send(
                     f"🎰🎉 {message.author.mention} 梭哈 **{quota} 点**\n"
-                    f"🃏 翻倍成功！毛奖金 **{gross_prize} 点**，手续费 {fee} 点（{ALLIN_FEE_PERCENT}%）销毁，实得 **{prize} 点**，当前额度 {new_quota} 点！{heaven_note}"
+                    f"🃏 翻倍成功！毛奖金 **{gross_prize} 点**，手续费 {fee} 点（{ALLIN_FEE_PERCENT}%）销毁，实得 **{prize} 点**，当前额度 {new_quota} 点！{heaven_note}{retry_note}"
                 )
             else:
+                # 时候未到！：归零时自动恢复 50 点
+                notyet = consume_effect(message.author.id, "notyet")
+                if notyet:
+                    recovered = await adjust_quota(client, "grant", message.author.name, GACHA_NOTYET_RECOVER)
+                    notyet_note = f"\n⏰ 时候未到！生效！额度恢复 {GACHA_NOTYET_RECOVER} 点，当前 {recovered} 点！" if recovered is not None else ""
+                else:
+                    notyet_note = ""
                 # 清零：全部销毁
                 await message.channel.send(
                     f"🎰💥 {message.author.mention} 梭哈 **{quota} 点**\n"
-                    f"🃏 运气不佳，全部清零！当前额度 0 点。"
+                    f"🃏 运气不佳，全部清零！当前额度 0 点。{retry_note}{notyet_note}"
                 )
             return
 

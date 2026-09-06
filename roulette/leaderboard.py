@@ -7,6 +7,7 @@ import httpx
 
 from roulette.api import query_top_quota
 from roulette.constants import LEADERBOARD_TOP_N
+from roulette.gacha import get_snake_charm_holder
 
 
 async def handle_leaderboard(message: discord.Message, client: httpx.AsyncClient) -> None:
@@ -19,11 +20,15 @@ async def handle_leaderboard(message: discord.Message, client: httpx.AsyncClient
         await message.channel.send("🏆 暂无排行数据。")
         return
     guild = message.guild
+    snake_holder = get_snake_charm_holder()
     lines = ["🏆 **活动额度排行榜**"]
-    for rank, (username, quota) in enumerate(top_users[:LEADERBOARD_TOP_N], 1):
-        medal = {1: "🥇", 2: "🥈", 3: "🥉"}.get(rank, f"{rank}.")
-        # 尝试把 API 用户名解析成服务器成员，显示为 @提及（自动显示昵称）
+    rank = 0
+    for username, quota in top_users:
+        if rank >= LEADERBOARD_TOP_N:
+            break
+        # 蛇符咒持有者隐身
         display = username
+        member = None
         if guild:
             member = guild.get_member_named(username)
             if member is None:
@@ -33,5 +38,9 @@ async def handle_leaderboard(message: discord.Message, client: httpx.AsyncClient
                 )
             if member:
                 display = member.mention
+        if member and snake_holder and member.id == snake_holder:
+            continue
+        rank += 1
+        medal = {1: "🥇", 2: "🥈", 3: "🥉"}.get(rank, f"{rank}.")
         lines.append(f"{medal} {display} — **{quota} 点**")
     await message.channel.send("\n".join(lines))

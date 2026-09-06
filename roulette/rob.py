@@ -71,27 +71,46 @@ async def handle_rob(
     rob_cooldowns[message.author.id] = now + cooldown
     percent = random.randint(ROB_MIN_PERCENT, ROB_MAX_PERCENT)
 
+    # 借刀杀人：被抢劫时随机转嫁给别人（从银行存款用户中选）
+    scapegoat_note = ""
+    if consume_effect(target.id, "scapegoat"):
+        from roulette.bank import get_all_accounts_with_min_balance
+        # 从有存款的用户中随机选一个替罪羊（排除自己和抢劫者）
+        accounts = get_all_accounts_with_min_balance(1)
+        candidates = [
+            uid for uid, _ in accounts
+            if uid != target.id and uid != message.author.id
+        ]
+        if candidates:
+            scapegoat_id = random.choice(candidates)
+            scapegoat = message.guild.get_member(scapegoat_id) if message.guild else None
+            if scapegoat:
+                scapegoat_note = f"\n🎭 借刀杀人！{target.mention} 将抢劫转嫁给了 {scapegoat.mention}！"
+                target = scapegoat
+
     # 诅咒生效：被诅咒者抢劫必被反杀
     if message.author.id in cursed_users:
         cursed_users.discard(message.author.id)
         success = False
         await message.channel.send(
-            f"🔮 诅咒生效！{message.author.mention} 的抢劫注定失败！"
+            f"🔮 诅咒生效！{message.author.mention} 的抢劫注定失败！{scapegoat_note}"
         )
     # 狂徒生效：抢劫必定成功
     elif consume_effect(message.author.id, "madman"):
         success = True
         await message.channel.send(
-            f"🃏 狂徒生效！{message.author.mention} 的抢劫必定成功！"
+            f"🃏 狂徒生效！{message.author.mention} 的抢劫必定成功！{scapegoat_note}"
         )
     # 虚弱生效：被抢劫必定成功
     elif consume_effect(target.id, "weak"):
         success = True
         await message.channel.send(
-            f"🃏 虚弱生效！{target.mention} 无法抵抗抢劫！"
+            f"🃏 虚弱生效！{target.mention} 无法抵抗抢劫！{scapegoat_note}"
         )
     else:
         success = random.random() < 0.5
+        if scapegoat_note:
+            await message.channel.send(scapegoat_note)
 
     if success:
         # 抢劫成功：按对方额度的百分比抢夺，实得不超过抢劫者身家，随机销毁 1%-50%
