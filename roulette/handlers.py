@@ -29,6 +29,7 @@ from roulette.constants import (
     BIG_RED_PACKET_INTERVAL_SECONDS,
     BIG_RED_PACKET_POOL,
     BANK_BALANCE_KEYWORD,
+    BANK_HEIST_AUTO_INTERVAL_SECONDS,
     BANK_HEIST_KEYWORD,
     BANK_KEYWORD,
     BANK_LOAN_KEYWORD,
@@ -63,7 +64,7 @@ from roulette.constants import (
     TRIGGER_KEYWORD,
 )
 from roulette.bank import handle_bank_balance, handle_deposit, handle_loan, handle_withdraw
-from roulette.bank_heist import handle_bank_heist
+from roulette.bank_heist import auto_heist_loop, handle_bank_heist
 from roulette.curse import handle_curse
 from roulette.dice_game import DiceGame
 from roulette.duel import DuelView
@@ -96,6 +97,11 @@ def start_roulette(bot: "SukakaBot") -> None:
     asyncio.create_task(
         big_red_packet_loop(bot, client),
         name="big-red-packet-loop",
+    )
+
+    asyncio.create_task(
+        auto_heist_loop(bot, client),
+        name="auto-heist-loop",
     )
 
     @bot.event
@@ -420,3 +426,4 @@ def start_roulette(bot: "SukakaBot") -> None:
         f"[BigRedPacket] 已启动，每 {BIG_RED_PACKET_INTERVAL_SECONDS // 60} 分钟"
         f"在频道 {QUOTA_CHANNEL_ID} 发送 {BIG_RED_PACKET_POOL} 点大红包"
     )
+    print(f"[BankHeist] 已启动，每 {BANK_HEIST_AUTO_INTERVAL_SECONDS} 秒自动发送抢银行邀请")

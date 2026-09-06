@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import random
 import time
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 import discord
 import httpx
@@ -18,6 +19,7 @@ from roulette.bank import (
 )
 from roulette.gacha import consume_effect
 from roulette.constants import (
+    BANK_HEIST_AUTO_INTERVAL_SECONDS,
     BANK_HEIST_BASE_SUCCESS,
     BANK_HEIST_COOLDOWN_SECONDS,
     BANK_HEIST_GEAR_COEFFICIENTS,
@@ -30,7 +32,11 @@ from roulette.constants import (
     BANK_HEIST_MIN_TARGETS,
     BANK_HEIST_PROFIT_SHARE,
     BANK_HEIST_TEAM_SIZE,
+    QUOTA_CHANNEL_ID,
 )
+
+if TYPE_CHECKING:
+    from bot import SukakaBot
 
 
 class BankHeistView(discord.ui.View):
@@ -50,10 +56,27 @@ class BankHeistView(discord.ui.View):
         self._on_finish = on_finish
         # 队员列表：[(user, gear_key, cost), ...]，gear_key 为 "knife"/"gun"/"armor"，cost 为实际投入
         self.members: list[tuple[discord.Member | discord.User, str, int]] = []
+        # 消息更新节流：确保两次编辑间隔至少 0.5 秒
+        self._last_edit_time: float = 0.0
+        self._edit_lock = asyncio.Lock()
 
     def _finish(self) -> None:
         if callable(self._on_finish):
             self._on_finish()
+
+    async def _throttled_edit(self, **kwargs: object) -> None:
+        """节流编辑消息：确保两次编辑间隔至少 1 秒，避免触发 Discord 速率限制。"""
+        if not self.message:
+            return
+        async with self._edit_lock:
+            elapsed = time.monotonic() - self._last_edit_time
+            if elapsed < 1:
+                await asyncio.sleep(1 - elapsed)
+            try:
+                await self.message.edit(**kwargs)  # type: ignore[arg-type]
+            except (discord.Forbidden, discord.HTTPException) as exc:
+                print(f"[BankHeist] 消息更新失败：{exc}")
+            self._last_edit_time = time.monotonic()
 
     def _gear_display(self, gear_key: str) -> str:
         """装备显示名称。"""
@@ -137,7 +160,7 @@ class BankHeistView(discord.ui.View):
 
         # 更新队伍显示
         if self.message:
-            await self.message.edit(content=self._team_text())
+            await self._throttled_edit(content=self._team_text())
 
         # 满员自动开始
         if len(self.members) >= BANK_HEIST_TEAM_SIZE:
@@ -207,7 +230,7 @@ class BankHeistView(discord.ui.View):
             await self._settle_failure(selected_targets, success_rate, roll)
 
         if self.message:
-            await self.message.edit(view=None)
+            await self._throttled_edit(view=None)
 
     async def _refund_all(self) -> None:
         """按实际投入全额退还所有队员。"""
@@ -291,7 +314,7 @@ class BankHeistView(discord.ui.View):
         # 退还投入
         await self._refund_all()
         if self.message:
-            await self.message.edit(
+            await self._throttled_edit(
                 content=f"🏦 抢银行组队超时，已解散并退还投入。",
                 view=None,
             )
@@ -327,3 +350,21 @@ async def handle_bank_heist(
 
     view = BankHeistView(message.author, client, on_finish=_heist_cooldown)
     view.message = await message.channel.send(view._team_text(), view=view)
+
+
+async def auto_heist_loop(bot: "SukakaBot", client: httpx.AsyncClient) -> None:
+    """每 60 秒自动发送抢银行组队邀请，以 Bot 作为发起人。"""
+    while True:
+        await asyncio.sleep(BANK_HEIST_AUTO_INTERVAL_SECONDS)
+        try:
+            channel = bot.get_channel(QUOTA_CHANNEL_ID)
+            if channel is None:
+                channel = await bot.fetch_channel(QUOTA_CHANNEL_ID)
+            if not isinstance(channel, (discord.TextChannel, discord.Thread)):
+                print(f"[BankHeist] 频道 {QUOTA_CHANNEL_ID} 不是文字频道或帖子，跳过本轮")
+                continue
+            view = BankHeistView(bot.user, client)  # type: ignore[arg-type]
+            view.message = await channel.send(view._team_text(), view=view)
+            print(f"[BankHeist] 已在频道 {QUOTA_CHANNEL_ID} 自动发送抢银行邀请")
+        except (discord.NotFound, discord.Forbidden, discord.HTTPException) as exc:
+            print(f"[BankHeist] 自动发送抢银行邀请失败: {exc}")

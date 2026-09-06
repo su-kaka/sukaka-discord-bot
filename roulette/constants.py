@@ -98,6 +98,7 @@ BANK_HEIST_GEAR_NAMES = {"knife": "跑刀", "gun": "起枪", "armor": "全甲"}
 BANK_HEIST_GEAR_COST = {"knife": 10, "gun": 50, "armor": 100}  # 装备固定投入（点），同时作为最低额度门槛
 BANK_HEIST_GEAR_COEFFICIENTS = {"knife": 1, "gun": 5, "armor": 10}  # 收益系数
 BANK_HEIST_GEAR_SUCCESS_BONUS = {"knife": 5, "gun": 15, "armor": 30}  # 成功率加成（%）
+BANK_HEIST_AUTO_INTERVAL_SECONDS = 60  # 自动发送抢银行邀请的间隔（秒）
 
 BANK_LOAN_KEYWORD = "贷款"
 BANK_LOAN_AMOUNT = 50  # 贷款额度
