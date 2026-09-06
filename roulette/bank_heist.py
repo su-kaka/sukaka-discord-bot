@@ -49,8 +49,8 @@ class BankHeistView(discord.ui.View):
         self.message: Optional[discord.Message] = None
         self.completed = False
         self._on_finish = on_finish
-        # 队员列表：[(user, gear_key), ...]，gear_key 为 "knife"/"gun"/"armor"
-        self.members: list[tuple[discord.Member | discord.User, str]] = []
+        # 队员列表：[(user, gear_key, cost), ...]，gear_key 为 "knife"/"gun"/"armor"，cost 为实际投入
+        self.members: list[tuple[discord.Member | discord.User, str, int]] = []
 
     def _finish(self) -> None:
         if callable(self._on_finish):
@@ -65,7 +65,7 @@ class BankHeistView(discord.ui.View):
         if not self.members:
             return "暂无队员"
         lines = []
-        for i, (user, gear) in enumerate(self.members, 1):
+        for i, (user, gear, _cost) in enumerate(self.members, 1):
             lines.append(f"{i}. {user.mention} — {self._gear_display(gear)}")
         return "\n".join(lines)
 
@@ -134,7 +134,7 @@ class BankHeistView(discord.ui.View):
             await interaction.response.send_message("扣除装备投入失败，请稍后再试。", ephemeral=True)
             return
 
-        self.members.append((user, gear_key))
+        self.members.append((user, gear_key, cost))
         await interaction.response.send_message(
             f"✅ {user.mention} 已报名 {self._gear_display(gear_key)}（投入 {cost} 点）！",
             ephemeral=True,
@@ -167,13 +167,13 @@ class BankHeistView(discord.ui.View):
         self._finish()
 
         # 计算团队装备总和和成功率
-        total_coefficient = sum(BANK_HEIST_GEAR_COEFFICIENTS[gear] for _, gear in self.members)
-        total_success_bonus = sum(BANK_HEIST_GEAR_SUCCESS_BONUS[gear] for _, gear in self.members)
+        total_coefficient = sum(BANK_HEIST_GEAR_COEFFICIENTS[gear] for _, gear, _ in self.members)
+        total_success_bonus = sum(BANK_HEIST_GEAR_SUCCESS_BONUS[gear] for _, gear, _ in self.members)
         success_rate = BANK_HEIST_BASE_SUCCESS + total_success_bonus
 
         # 天神下凡：队伍里有人持有则成功率翻倍
         avatar_used = False
-        for user, _ in self.members:
+        for user, _, _ in self.members:
             if consume_effect(user.id, "avatar"):
                 avatar_used = True
                 break
@@ -183,7 +183,7 @@ class BankHeistView(discord.ui.View):
         success_rate = min(success_rate, 95)  # 上限 95%
 
         # 随机选取 1-3 个目标（排除发起人和队员自己的银行账户）
-        member_ids = {self.leader.id} | {user.id for user, _ in self.members}
+        member_ids = {self.leader.id} | {user.id for user, _, _ in self.members}
         targets = [
             (discord_id, balance)
             for discord_id, balance in get_all_accounts_with_min_balance(BANK_HEIST_MIN_BALANCE)
@@ -215,13 +215,9 @@ class BankHeistView(discord.ui.View):
             await self.message.edit(view=None)
 
     async def _refund_all(self) -> None:
-        """退还所有队员投入。"""
-        for user, gear_key in self.members:
-            quota = await query_quota(self.client, user.name)
-            if quota is not None:
-                cost_percent = BANK_HEIST_GEAR_COST_PERCENT[gear_key]
-                cost = max(1, int(quota * cost_percent / 100))
-                await adjust_quota(self.client, "grant", user.name, cost)
+        """按实际投入全额退还所有队员。"""
+        for user, _gear_key, cost in self.members:
+            await adjust_quota(self.client, "grant", user.name, cost)
 
     async def _settle_success(
         self,
@@ -249,18 +245,19 @@ class BankHeistView(discord.ui.View):
 
         # 按系数分配
         member_shares = []
-        for user, gear_key in self.members:
+        for user, gear_key, cost in self.members:
             coeff = BANK_HEIST_GEAR_COEFFICIENTS[gear_key]
             share = int(team_share * coeff / total_coefficient)
-            # 返还投入 + 收益
-            quota = await query_quota(self.client, user.name)
-            if quota is not None:
-                cost_percent = BANK_HEIST_GEAR_COST_PERCENT[gear_key]
-                cost = max(1, int(quota * cost_percent / 100))
-                total_return = cost + share
-                new_quota = await adjust_quota(self.client, "grant", user.name, total_return)
+            # 全额返还实际投入 + 收益
+            total_return = cost + share
+            new_quota = await adjust_quota(self.client, "grant", user.name, total_return)
+            if new_quota is not None:
                 member_shares.append(
                     f"{user.mention} 返还 {cost} + 分得 {share} = **{total_return} 点**（当前 {new_quota} 点）"
+                )
+            else:
+                member_shares.append(
+                    f"{user.mention} 返还 {cost} + 分得 {share} = **{total_return} 点**（发放失败，请联系管理员）"
                 )
             # 标记仇恨
             set_hatred(user.id)
