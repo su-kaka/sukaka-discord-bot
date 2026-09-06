@@ -134,6 +134,16 @@ def get_all_accounts_with_min_balance(min_balance: int) -> list[tuple[int, int]]
     return rows
 
 
+def get_richest_accounts(min_balance: int, limit: int) -> list[tuple[int, int]]:
+    """查询存款最多的前 limit 个账号（存款 ≥ min_balance），按存款降序返回。"""
+    with sqlite3.connect(DB_PATH) as conn:
+        rows = conn.execute(
+            "SELECT discord_id, balance FROM bank_accounts WHERE balance >= ? ORDER BY balance DESC LIMIT ?",
+            (min_balance, limit),
+        ).fetchall()
+    return rows
+
+
 def set_hatred(discord_id: int) -> None:
     """标记仇恨状态。"""
     now = sqlite3.connect(DB_PATH).execute("SELECT strftime('%s', 'now')").fetchone()[0]

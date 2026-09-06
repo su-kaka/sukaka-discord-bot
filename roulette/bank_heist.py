@@ -13,7 +13,7 @@ import httpx
 from roulette.api import adjust_quota, query_quota
 from roulette.bank import (
     _set_balance,
-    get_all_accounts_with_min_balance,
+    get_richest_accounts,
     mark_heist_cooldown,
     set_hatred,
 )
@@ -200,22 +200,24 @@ class BankHeistView(discord.ui.View):
 
         success_rate = min(success_rate, 95)  # 上限 95%
 
-        # 随机选取 1-3 个目标（排除发起人和队员自己的银行账户）
+        # 优先选取存款最多的目标（排除发起人和队员自己的银行账户）
         member_ids = {self.leader.id} | {user.id for user, _, _ in self.members}
-        targets = [
+        # 取存款最多的前 30 个候选（含队员排除冗余），再按存款排序选 1-10 个
+        candidates = [
             (discord_id, balance)
-            for discord_id, balance in get_all_accounts_with_min_balance(BANK_HEIST_MIN_BALANCE)
+            for discord_id, balance in get_richest_accounts(BANK_HEIST_MIN_BALANCE, 30)
             if discord_id not in member_ids
         ]
-        if not targets:
+        if not candidates:
             await self.message.channel.send(
                 f"🏦 抢银行失败：没有存款 ≥ {BANK_HEIST_MIN_BALANCE} 的目标（不能抢自己的银行）。"
             )
             await self._refund_all()
             return
 
-        num_targets = random.randint(BANK_HEIST_MIN_TARGETS, min(BANK_HEIST_MAX_TARGETS, len(targets)))
-        selected_targets = random.sample(targets, num_targets)
+        num_targets = random.randint(BANK_HEIST_MIN_TARGETS, min(BANK_HEIST_MAX_TARGETS, len(candidates)))
+        # 按存款排序后取前 num_targets 个
+        selected_targets = candidates[:num_targets]
 
         # 判定成功
         roll = random.random() * 100
