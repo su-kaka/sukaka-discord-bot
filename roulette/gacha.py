@@ -14,7 +14,7 @@ import discord
 import httpx
 
 from roulette.api import adjust_quota, query_quota, query_top_quota
-from roulette.bank import has_royal_security_service
+from roulette.bank import _get_balance, _set_balance, has_royal_security_service
 from roulette.constants import (
     BANK_ROYAL_SECURITY_THRESHOLD,
     GACHA_BLANK_CHANCE,
@@ -56,7 +56,7 @@ CARD_POOL: dict[str, tuple[str, str, int]] = {
     "forlove": ("因为爱情", "下次结婚时获得对方所有额度", 10),
     "taxevasion": ("偷税漏税", "下次取钱手续费为 0", 10),
     "notyet": ("时候未到", "梭哈归零时自动恢复 50 点", 10),
-    "yourname": ("你的名字", "【超稀有道具】使用 `你的名字@某人` 和某人交换身体：双方交换所有额度/卡牌，5 分钟后换回，期间双方不能再被你的名字影响", 1),
+    "yourname": ("你的名字", "【超稀有道具】使用 `你的名字@某人` 和某人交换身体：双方交换所有额度/卡牌/银行存款，5 分钟后换回，期间双方不能再被你的名字影响", 1),
     "blank": ("空白", "无效果", 40),  # 实际概率由 GACHA_BLANK_CHANCE 控制
 }
 
@@ -672,7 +672,7 @@ async def _swap_bodies(
     user_b: discord.Member | discord.User,
     client: httpx.AsyncClient,
 ) -> bool:
-    """交换双方所有额度和卡牌，返回是否成功。"""
+    """交换双方所有额度、卡牌和银行存款，返回是否成功。"""
     a_quota = await query_quota(client, user_a.name)
     b_quota = await query_quota(client, user_b.name)
     if a_quota is None or b_quota is None:
@@ -690,6 +690,13 @@ async def _swap_bodies(
         await adjust_quota(client, "grant", user_a.name, b_quota)
 
     _swap_cards(user_a.id, user_b.id)
+
+    # 交换银行存款
+    a_balance = _get_balance(user_a.id)
+    b_balance = _get_balance(user_b.id)
+    _set_balance(user_a.id, b_balance)
+    _set_balance(user_b.id, a_balance)
+
     return True
 
 
@@ -715,9 +722,9 @@ async def handle_yourname(
     message: discord.Message,
     client: httpx.AsyncClient,
 ) -> None:
-    """你的名字：和某人交换身体，双方交换所有额度/卡牌，5 分钟后换回。"""
+    """你的名字：和某人交换身体，双方交换所有额度/卡牌/银行存款，5 分钟后换回。"""
     if not message.mentions:
-        await message.channel.send("🌀 用法：`你的名字 @某人`，双方交换所有额度/卡牌，5 分钟后换回。")
+        await message.channel.send("🌀 用法：`你的名字 @某人`，双方交换所有额度/卡牌/银行存款，5 分钟后换回。")
         return
     partner = message.mentions[0]
     if partner.id == message.author.id:
@@ -740,7 +747,7 @@ async def handle_yourname(
     minutes = YOURNAME_SWAP_SECONDS // 60
     await message.channel.send(
         f"🌀 {message.author.mention} 对 {partner.mention} 使用 **你的名字**！\n"
-        f"💫 双方交换了所有额度和卡牌，{minutes} 分钟后换回！期间双方不能再被你的名字影响。"
+        f"💫 双方交换了所有额度、卡牌和银行存款，{minutes} 分钟后换回！期间双方不能再被你的名字影响。"
     )
 
     _record_body_swap(message.author.id, partner.id, message.channel.id)
