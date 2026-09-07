@@ -1,4 +1,4 @@
-"""抢劫：50% 抢到对方 10%-30% 点，50% 被反杀自己扣 10%-30% 点。"""
+"""抢劫：50% 抢到对方 10%-30% 点，50% 被反杀自己扣 10%-30% 点；成功时随机抢夺对方身上一个道具。"""
 
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ from roulette.constants import (
     ROB_MIN_PERCENT,
     ROB_MIN_QUOTA,
 )
-from roulette.gacha import consume_effect, has_effect
+from roulette.gacha import consume_effect, has_effect, steal_random_card
 
 
 async def handle_rob(
@@ -33,7 +33,8 @@ async def handle_rob(
         await message.channel.send(
             f"🔫 用法：`抢劫 @某人`，50% 抢到对方 {ROB_MIN_PERCENT}%-{ROB_MAX_PERCENT}% 额度，"
             f"50% 被反杀自己扣 {ROB_MIN_PERCENT}%-{ROB_MAX_PERCENT}% 额度"
-            f"（抢到部分随机销毁 {ROB_FEE_MIN_PERCENT}%-{ROB_FEE_MAX_PERCENT}%，需额度 ≥ {ROB_MIN_QUOTA} 点）。"
+            f"（抢到部分随机销毁 {ROB_FEE_MIN_PERCENT}%-{ROB_FEE_MAX_PERCENT}%，需额度 ≥ {ROB_MIN_QUOTA} 点，"
+            f"成功时随机抢夺对方身上一个道具）。"
         )
         return
     target = message.mentions[0]
@@ -121,9 +122,16 @@ async def handle_rob(
         stolen = max(1, int(target_quota * percent / 100))
         stolen = min(stolen, target_quota)
         if stolen <= 0:
-            await message.channel.send(
-                f"🔫 {message.author.mention} 抢劫 {target.mention}，但对方身无分文，一无所获！"
-            )
+            card_name = steal_random_card(message.author.id, target.id)
+            if card_name:
+                await message.channel.send(
+                    f"🔫 {message.author.mention} 抢劫 {target.mention}，对方身无分文，\n"
+                    f"但顺手抢到了对方身上的道具 **{card_name}**！"
+                )
+            else:
+                await message.channel.send(
+                    f"🔫 {message.author.mention} 抢劫 {target.mention}，但对方身无分文，一无所获！"
+                )
             return
         deducted = await adjust_quota(client, "deduct", target.name, stolen)
         if deducted is None:
@@ -144,10 +152,17 @@ async def handle_rob(
                 return
         else:
             new_quota = robber_quota
+        # 顺手牵羊：随机抢夺对方身上一个道具
+        card_name = steal_random_card(message.author.id, target.id)
+        card_note = (
+            f"\n🎁 顺手牵羊！抢到 {target.mention} 身上的道具 **{card_name}**！"
+            if card_name
+            else ""
+        )
         await message.channel.send(
             f"🔫 {message.author.mention} 抢劫 {target.mention} 成功！\n"
             f"抢到 **{stolen} 点**（{percent}% 额度，销毁 {fee} 点（{fee_percent}%），实得 {gain} 点，当前 {new_quota} 点），"
-            f"{target.mention} 剩余 {deducted} 点。"
+            f"{target.mention} 剩余 {deducted} 点。{card_note}"
         )
     else:
         # 被反杀：按自己额度的百分比扣除，全销毁

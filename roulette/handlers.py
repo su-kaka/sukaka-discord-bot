@@ -64,13 +64,20 @@ from roulette.constants import (
     RULES_KEYWORD,
     SEDUCE_KEYWORD,
     TRIGGER_KEYWORD,
+    YOURNAME_KEYWORD,
 )
 from roulette.bank import handle_bank_balance, handle_deposit, handle_loan, handle_withdraw
 from roulette.bank_heist import auto_heist_loop, handle_bank_heist
 from roulette.curse import handle_curse
 from roulette.dice_game import DiceGame
 from roulette.duel import DuelView
-from roulette.gacha import consume_effect, handle_gacha, handle_my_cards, handle_seduce
+from roulette.gacha import (
+    consume_effect,
+    handle_gacha,
+    handle_my_cards,
+    handle_seduce,
+    handle_yourname,
+)
 from roulette.leaderboard import handle_leaderboard
 from roulette.lottery import handle_lottery
 from roulette.marry import MarryView
@@ -270,6 +277,11 @@ def start_roulette(bot: "SukakaBot") -> None:
         # 诱惑：使用诱惑卡强制结婚
         if content.startswith(SEDUCE_KEYWORD):
             await handle_seduce(message, client)
+            return
+
+        # 你的名字：交换身体，5 分钟后换回
+        if content.startswith(YOURNAME_KEYWORD):
+            await handle_yourname(message, client)
             return
 
         # 梭哈：全部额度押上，扣 2 点手续费后 50% 翻倍或清零

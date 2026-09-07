@@ -74,6 +74,8 @@ GACHA_ERROR_MIN = 1  # 错误卡重置额度下限
 GACHA_ERROR_MAX = 1000  # 错误卡重置额度上限
 GACHA_NOTYET_RECOVER = 50  # 时候未到！恢复额度
 SEDUCE_KEYWORD = "诱惑"
+YOURNAME_KEYWORD = "你的名字"
+YOURNAME_SWAP_SECONDS = 300  # 交换身体持续时间（秒）
 MY_CARDS_KEYWORD = "我的卡牌"
 
 BANK_KEYWORD = "存钱"

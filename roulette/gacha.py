@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 import random
 import sqlite3
@@ -28,6 +29,7 @@ from roulette.constants import (
     GACHA_SELFDESTRUCT_MIN_PERCENT,
     MARRY_FEE_PERCENT,
     MARRY_MIN_FEE,
+    YOURNAME_SWAP_SECONDS,
 )
 from roulette.packet_base import PacketView
 from roulette.utils import split_random
@@ -54,6 +56,7 @@ CARD_POOL: dict[str, tuple[str, str, int]] = {
     "forlove": ("因为爱情", "下次结婚时获得对方所有额度", 10),
     "taxevasion": ("偷税漏税", "下次取钱手续费为 0", 10),
     "notyet": ("时候未到", "梭哈归零时自动恢复 50 点", 10),
+    "yourname": ("你的名字", "【超稀有道具】使用 `你的名字@某人` 和某人交换身体：双方交换所有额度/卡牌，5 分钟后换回，期间双方不能再被你的名字影响", 1),
     "blank": ("空白", "无效果", 40),  # 实际概率由 GACHA_BLANK_CHANCE 控制
 }
 
@@ -151,11 +154,12 @@ def has_membership_card(discord_id: int) -> bool:
 
 
 def _draw_card(exclude: Optional[set[str]] = None) -> str:
-    """抽一张卡：GACHA_BLANK_CHANCE 概率空白，其余均分。"""
+    """抽一张卡：GACHA_BLANK_CHANCE 概率空白，其余按权重随机。"""
     if random.random() < GACHA_BLANK_CHANCE:
         return "blank"
     keys = [k for k in CARD_POOL if k != "blank" and (exclude is None or k not in exclude)]
-    return random.choice(keys)
+    weights = [CARD_POOL[k][2] for k in keys]
+    return random.choices(keys, weights=weights, k=1)[0]
 
 
 def _add_effect(discord_id: int, card_key: str, remaining: int = 1) -> None:
@@ -215,6 +219,27 @@ def get_user_cards(discord_id: int) -> list[tuple[str, int]]:
             (discord_id,),
         ).fetchall()
     return rows
+
+
+def steal_random_card(robber_id: int, target_id: int) -> Optional[str]:
+    """抢劫成功时随机偷取对方身上一个道具（含蛇符咒、会员卡），返回道具名称，无道具可偷返回 None。"""
+    candidates = [card_key for card_key, _ in get_user_cards(target_id)]
+    if has_snake_charm(target_id):
+        candidates.append("snake")
+    if has_membership_card(target_id):
+        candidates.append("membership")
+    if not candidates:
+        return None
+    card_key = random.choice(candidates)
+    if card_key == "snake":
+        set_snake_charm_holder(robber_id)
+    elif card_key == "membership":
+        set_membership_card_holder(robber_id)
+    else:
+        consume_effect(target_id, card_key)
+        _add_effect(robber_id, card_key, 1)
+    name, _, _ = CARD_POOL.get(card_key, (card_key, "", 0))
+    return name
 
 
 async def handle_my_cards(message: discord.Message) -> None:
@@ -571,6 +596,116 @@ async def handle_seduce(
         f"{message.author.mention} 分得 **{p_share} 点**（当前 {p_new if p_new is not None else '?'} 点）\n"
         f"{partner.mention} 分得 **{q_share} 点**（当前 {q_new if q_new is not None else '?'} 点）"
     )
+
+
+# 你的名字：交换身体状态（user_id -> 换回任务）
+_active_body_swaps: dict[int, asyncio.Task] = {}
+
+
+def is_body_swapped(discord_id: int) -> bool:
+    """是否处于交换身体状态（期间不能再被你的名字影响）。"""
+    return discord_id in _active_body_swaps
+
+
+def _swap_cards(user_a_id: int, user_b_id: int) -> None:
+    """交换双方所有卡牌效果。"""
+    temp_id = -user_a_id  # 临时 ID，避免主键冲突
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute(
+            "UPDATE gacha_effects SET discord_id = ? WHERE discord_id = ?",
+            (temp_id, user_a_id),
+        )
+        conn.execute(
+            "UPDATE gacha_effects SET discord_id = ? WHERE discord_id = ?",
+            (user_a_id, user_b_id),
+        )
+        conn.execute(
+            "UPDATE gacha_effects SET discord_id = ? WHERE discord_id = ?",
+            (user_b_id, temp_id),
+        )
+
+
+async def _swap_bodies(
+    user_a: discord.Member | discord.User,
+    user_b: discord.Member | discord.User,
+    client: httpx.AsyncClient,
+) -> bool:
+    """交换双方所有额度和卡牌，返回是否成功。"""
+    a_quota = await query_quota(client, user_a.name)
+    b_quota = await query_quota(client, user_b.name)
+    if a_quota is None or b_quota is None:
+        return False
+
+    if a_quota > 0 and await adjust_quota(client, "deduct", user_a.name, a_quota) is None:
+        return False
+    if b_quota > 0 and await adjust_quota(client, "deduct", user_b.name, b_quota) is None:
+        if a_quota > 0:
+            await adjust_quota(client, "grant", user_a.name, a_quota)  # 回滚
+        return False
+    if a_quota > 0:
+        await adjust_quota(client, "grant", user_b.name, a_quota)
+    if b_quota > 0:
+        await adjust_quota(client, "grant", user_a.name, b_quota)
+
+    _swap_cards(user_a.id, user_b.id)
+    return True
+
+
+async def _swap_back_later(
+    channel: discord.abc.Messageable,
+    user_a: discord.Member | discord.User,
+    user_b: discord.Member | discord.User,
+    client: httpx.AsyncClient,
+) -> None:
+    """5 分钟后换回身体。"""
+    await asyncio.sleep(YOURNAME_SWAP_SECONDS)
+    try:
+        if await _swap_bodies(user_a, user_b, client):
+            await channel.send(f"🌀 {user_a.mention} 和 {user_b.mention} 的身体换回来了！")
+        else:
+            await channel.send(f"🌀 {user_a.mention} 和 {user_b.mention} 换回身体失败，请联系管理员。")
+    finally:
+        _active_body_swaps.pop(user_a.id, None)
+        _active_body_swaps.pop(user_b.id, None)
+
+
+async def handle_yourname(
+    message: discord.Message,
+    client: httpx.AsyncClient,
+) -> None:
+    """你的名字：和某人交换身体，双方交换所有额度/卡牌，5 分钟后换回。"""
+    if not message.mentions:
+        await message.channel.send("🌀 用法：`你的名字 @某人`，双方交换所有额度/卡牌，5 分钟后换回。")
+        return
+    partner = message.mentions[0]
+    if partner.id == message.author.id:
+        await message.channel.send("🌀 不能对自己使用你的名字。")
+        return
+    if partner.bot:
+        await message.channel.send("🌀 不能对机器人使用你的名字。")
+        return
+    if is_body_swapped(message.author.id) or is_body_swapped(partner.id):
+        await message.channel.send("🌀 其中一方正在交换身体中，期间不能再被你的名字影响！")
+        return
+    if not consume_effect(message.author.id, "yourname"):
+        await message.channel.send("🌀 你没有生效中的「你的名字」卡。")
+        return
+
+    if not await _swap_bodies(message.author, partner, client):
+        await message.channel.send("🌀 交换身体失败，请稍后再试。")
+        return
+
+    minutes = YOURNAME_SWAP_SECONDS // 60
+    await message.channel.send(
+        f"🌀 {message.author.mention} 对 {partner.mention} 使用 **你的名字**！\n"
+        f"💫 双方交换了所有额度和卡牌，{minutes} 分钟后换回！期间双方不能再被你的名字影响。"
+    )
+
+    task = asyncio.create_task(
+        _swap_back_later(message.channel, message.author, partner, client)
+    )
+    _active_body_swaps[message.author.id] = task
+    _active_body_swaps[partner.id] = task
 
 
 _init_db()
