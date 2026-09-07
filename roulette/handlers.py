@@ -212,15 +212,24 @@ def start_roulette(bot: "SukakaBot") -> None:
             def _duel_cooldown(user_id: int = message.author.id) -> None:
                 duel_cooldowns[user_id] = time.monotonic() + DUEL_COOLDOWN_SECONDS
 
-            # 挑衅卡生效：对方无法拒绝
+            # 挑衅卡生效：对方无法拒绝，决斗立即自动结算
             provoked = consume_effect(message.author.id, "provoke")
-            provoke_note = "\n😡 挑衅生效！对方无法拒绝这场决斗！" if provoked else ""
 
             view = DuelView(message.author, opponent, client, on_finish=_duel_cooldown, cursed_users=cursed_users, provoked=provoked)
+            if provoked:
+                view.message = await message.channel.send(
+                    f"⚔️ {message.author.mention} 向 {opponent.mention} 发起决斗！\n"
+                    f"😡 挑衅生效！{opponent.mention} 无法拒绝，决斗立即开始！"
+                )
+                result_text, _ = await view.settle()
+                view.stop()
+                await message.channel.send(result_text)
+                return
+
             view.message = await message.channel.send(
                 f"⚔️ {message.author.mention} 向 {opponent.mention} 发起决斗！\n"
                 f"双方押上额度最少者的全部额度，赢家获得 80%（{DUEL_FEE_PERCENT}% 手续费销毁）。\n"
-                f"{opponent.mention} 请在 {DUEL_TIMEOUT_SECONDS} 秒内接受或拒绝。{provoke_note}",
+                f"{opponent.mention} 请在 {DUEL_TIMEOUT_SECONDS} 秒内接受或拒绝。",
                 view=view,
             )
             return

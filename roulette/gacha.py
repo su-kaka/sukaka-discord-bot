@@ -56,7 +56,7 @@ CARD_POOL: dict[str, tuple[str, str, int]] = {
     "selfdestruct": ("自爆", f"额度归零，随机销毁 {GACHA_SELFDESTRUCT_MIN_PERCENT}%-{GACHA_SELFDESTRUCT_MAX_PERCENT}%，剩余生成红包供所有人抢", 10),
     "snake": ("蛇符咒", "排行榜隐身，不会被劫富济贫，效果永久（唯一道具，直到下一个人抽到）", 5),
     "membership": ("会员卡", "抽卡费用减半、抽卡 CD 减半，效果永久（唯一道具，直到下一个人抽到）", 5),
-    "provoke": ("挑衅", "下次发起决斗时对方无法拒绝", 10),
+    "provoke": ("挑衅", "下次发起决斗时对方无法拒绝，决斗立即自动结算", 10),
     "error": ("错误", f"额度重置为 {GACHA_ERROR_MIN}-{GACHA_ERROR_MAX} 之间的随机值", 5),
     "retry": ("这把不算", "梭哈或决斗失败后可重来一次", 10),
     "scapegoat": ("借刀杀人", "下次被抢劫/诅咒时，随机转嫁给其他人", 10),

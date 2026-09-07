@@ -54,26 +54,34 @@ class DuelView(discord.ui.View):
             await interaction.response.send_message("决斗已结束。", ephemeral=True)
             return
 
+        result_text, done = await self.settle()
+        if done:
+            await interaction.response.send_message(result_text)
+            if self.message:
+                await self.message.edit(view=None)
+        else:
+            await interaction.response.send_message(result_text, ephemeral=True)
+
+    async def settle(self) -> tuple[str, bool]:
+        """执行决斗结算：返回 (结果文本, 是否完成)。未完成表示决斗未开始，可重试。"""
+        if self.completed:
+            return "决斗已结束。", True
+
         # 查询双方额度
         quotas: dict[int, int] = {}
         for player in (self.challenger, self.opponent):
             quota = await query_quota(self.client, player.name)
             if quota is None:
-                await interaction.response.send_message(
-                    f"查询 {player.display_name} 额度失败，请稍后再试。", ephemeral=True
-                )
-                return
+                return f"查询 {player.display_name} 额度失败，请稍后再试。", False
             if quota < DUEL_MIN_QUOTA:
-                await interaction.response.send_message(
+                return (
                     f"{player.display_name} 额度不足（当前 {quota} 点，需 ≥ {DUEL_MIN_QUOTA} 点），决斗取消。",
-                    ephemeral=True,
+                    False,
                 )
-                return
             quotas[player.id] = quota
 
         if self.completed:
-            await interaction.response.send_message("决斗已结束。", ephemeral=True)
-            return
+            return "决斗已结束。", True
 
         # 赌注为双方额度最少者的全部额度
         stake = min(quotas[self.challenger.id], quotas[self.opponent.id])
@@ -85,8 +93,7 @@ class DuelView(discord.ui.View):
             if result is None:
                 for q in paid:
                     await adjust_quota(self.client, "grant", q.name, stake)
-                await interaction.response.send_message("收取赌注失败，决斗取消。", ephemeral=True)
-                return
+                return "收取赌注失败，决斗取消。", False
             paid.append(player)
 
         self.completed = True
@@ -157,9 +164,7 @@ class DuelView(discord.ui.View):
                 f"（奖池 {gross_prize} 点，手续费 {fee} 点销毁）！当前额度 {new_quota} 点。"
             )
 
-        await interaction.response.send_message(result_text)
-        if self.message:
-            await self.message.edit(view=None)
+        return result_text, True
 
     @discord.ui.button(label="拒绝", style=discord.ButtonStyle.secondary, emoji="🏳️")
     async def decline_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
