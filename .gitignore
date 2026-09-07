@@ -4,6 +4,7 @@
 !package-lock.json
 !tsconfig.json
 *.toml
+*.to
 !pyproject.toml
 creds/
 CLAUDE.md
