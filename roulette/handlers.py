@@ -294,7 +294,7 @@ def start_roulette(bot: "SukakaBot") -> None:
                 "🧧 **红包**：押额度的 10%（最少 10 点），80% 分给最多 3 个幸运儿（20% 销毁）。\n"
                 "🔫 **抢劫**：50% 抢到对方 10%-30% 额度，50% 被反杀扣自己 10%-30%（抢到部分随机销毁 1%-50%，实得不超过自身额度），需 ≥ 10 点。\n"
                 "💍 **结婚**：两人额度合并，扣 10% 手续费（最低 10 点），剩余平分。\n"
-                "🔮 **诅咒**：押 10 点，被诅咒者下次抢劫必被反杀、决斗必输。\n"
+                "🔮 **诅咒**：押 10 点，被诅咒者下次抢劫必被反杀、决斗必输、梭哈必输。\n"
                 "🎰 **梭哈**：押全部额度，50% 翻倍（一念天堂翻四倍），成功后扣 20% 手续费，失败清零。\n"
                 "🎴 **抽卡**：押额度的 10%（最少 10 点），50% 空白，其余获得随机魔法卡或者道具。\n"
                 "🏦 **地精银行**：发送「存钱」押 50%（最低 10 点），发送「取钱」随机扣 1%-50% 手续费。存款超 1000 点解锁普通安保（防抢劫），超 2000 点解锁皇家安保（防抢劫/诱惑/劫富济贫）。\n"
@@ -359,9 +359,16 @@ def start_roulette(bot: "SukakaBot") -> None:
             has_retry = consume_effect(message.author.id, "retry")
             retry_note = ""
 
-            success = random.random() < success_chance
+            # 诅咒生效：被诅咒者梭哈必输
+            curse_note = ""
+            if message.author.id in cursed_users:
+                cursed_users.discard(message.author.id)
+                success = False
+                curse_note = f"\n🔮 诅咒生效！{message.author.mention} 的梭哈注定失败！"
+            else:
+                success = random.random() < success_chance
             if not success and has_retry:
-                # 重来一次
+                # 重来一次（诅咒已消耗，重新按正常概率判定）
                 retry_success = random.random() < success_chance
                 retry_note = (
                     f"\n🔄 **这把不算！**生效！第一次判定：❌ 失败……"
@@ -397,7 +404,7 @@ def start_roulette(bot: "SukakaBot") -> None:
                 # 清零：全部销毁
                 await message.channel.send(
                     f"🎰💥 {message.author.mention} 梭哈 **{quota} 点**\n"
-                    f"🃏 运气不佳，全部清零！当前额度 0 点。{retry_note}{notyet_note}"
+                    f"🃏 运气不佳，全部清零！当前额度 0 点。{curse_note}{retry_note}{notyet_note}"
                 )
             return
 

@@ -1,4 +1,4 @@
-"""诅咒：押 10 点（全销毁），被诅咒者下次抢劫必被反杀、决斗必输。"""
+"""诅咒：押 10 点（全销毁），被诅咒者下次抢劫必被反杀、决斗必输、梭哈必输。"""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ import discord
 import httpx
 
 from roulette.api import adjust_quota, query_quota
-from roulette.constants import CURSE_COOLDOWN_SECONDS, CURSE_COST, CURSE_KEYWORD
+from roulette.constants import CURSE_COOLDOWN_SECONDS, CURSE_COST
 from roulette.gacha import is_offline
 
 
@@ -23,7 +23,7 @@ async def handle_curse(
     if not message.mentions:
         await message.channel.send(
             f"🔮 用法：`诅咒 @某人`，押 {CURSE_COST} 点（全销毁），"
-            "被诅咒者下次抢劫必被反杀、决斗必输，生效一次后解除。"
+            "被诅咒者下次抢劫必被反杀、决斗必输、梭哈必输，生效一次后解除。"
         )
         return
     target = message.mentions[0]
