@@ -95,8 +95,6 @@ class BankHeistView(discord.ui.View):
         """检查用户是否可加入，返回错误信息或 None。"""
         if user.bot:
             return "机器人不能参与抢银行。"
-        if user.id == self.leader.id:
-            return "你是发起人，已自动加入。"
         if any(m[0].id == user.id for m in self.members):
             return "你已报名。"
         if len(self.members) >= BANK_HEIST_TEAM_SIZE:
@@ -172,7 +170,7 @@ class BankHeistView(discord.ui.View):
             f"🏦 **抢银行组队中** ({len(self.members)}/{BANK_HEIST_TEAM_SIZE})\n"
             f"发起人：{self.leader.mention}\n"
             f"{self._member_list_text()}\n"
-            f"点击按钮选择装备报名，满 {BANK_HEIST_TEAM_SIZE} 人自动开始！"
+            f"点击按钮选择装备报名（发起人也需要报名），满 {BANK_HEIST_TEAM_SIZE} 人自动开始！"
         )
 
     async def _start_heist(self) -> None:
