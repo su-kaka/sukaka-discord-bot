@@ -40,7 +40,6 @@ from roulette.constants import (
     YOURNAME_SWAP_SECONDS,
 )
 from roulette.packet_base import PacketView
-from roulette.utils import split_random
 
 DB_PATH = Path(os.getenv("GACHA_DB", GACHA_DB))
 
