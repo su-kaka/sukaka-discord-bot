@@ -93,6 +93,17 @@ def _init_db() -> None:
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS body_swaps (
+                user_a_id INTEGER NOT NULL,
+                user_b_id INTEGER NOT NULL,
+                channel_id INTEGER NOT NULL,
+                swap_at REAL NOT NULL,
+                PRIMARY KEY (user_a_id, user_b_id)
+            )
+            """
+        )
 
 
 def set_snake_charm_holder(discord_id: int) -> None:
@@ -598,13 +609,44 @@ async def handle_seduce(
     )
 
 
-# 你的名字：交换身体状态（user_id -> 换回任务）
-_active_body_swaps: dict[int, asyncio.Task] = {}
+# 你的名字：交换身体状态持久化到 SQLite，重启后自动恢复
+
+def _record_body_swap(user_a_id: int, user_b_id: int, channel_id: int) -> None:
+    """记录交换身体状态。"""
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute(
+            """
+            INSERT INTO body_swaps (user_a_id, user_b_id, channel_id, swap_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            (user_a_id, user_b_id, channel_id, time.time()),
+        )
+
+
+def _remove_body_swap(user_a_id: int, user_b_id: int) -> None:
+    """移除交换身体状态。"""
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute(
+            """
+            DELETE FROM body_swaps
+            WHERE (user_a_id = ? AND user_b_id = ?) OR (user_a_id = ? AND user_b_id = ?)
+            """,
+            (user_a_id, user_b_id, user_b_id, user_a_id),
+        )
 
 
 def is_body_swapped(discord_id: int) -> bool:
     """是否处于交换身体状态（期间不能再被你的名字影响）。"""
-    return discord_id in _active_body_swaps
+    with sqlite3.connect(DB_PATH) as conn:
+        row = conn.execute(
+            """
+            SELECT 1 FROM body_swaps
+            WHERE user_a_id = ? OR user_b_id = ?
+            LIMIT 1
+            """,
+            (discord_id, discord_id),
+        ).fetchone()
+    return row is not None
 
 
 def _swap_cards(user_a_id: int, user_b_id: int) -> None:
@@ -656,17 +698,17 @@ async def _swap_back_later(
     user_a: discord.Member | discord.User,
     user_b: discord.Member | discord.User,
     client: httpx.AsyncClient,
+    delay: float,
 ) -> None:
-    """5 分钟后换回身体。"""
-    await asyncio.sleep(YOURNAME_SWAP_SECONDS)
+    """延迟后换回身体。"""
+    await asyncio.sleep(delay)
     try:
         if await _swap_bodies(user_a, user_b, client):
             await channel.send(f"🌀 {user_a.mention} 和 {user_b.mention} 的身体换回来了！")
         else:
             await channel.send(f"🌀 {user_a.mention} 和 {user_b.mention} 换回身体失败，请联系管理员。")
     finally:
-        _active_body_swaps.pop(user_a.id, None)
-        _active_body_swaps.pop(user_b.id, None)
+        _remove_body_swap(user_a.id, user_b.id)
 
 
 async def handle_yourname(
@@ -701,11 +743,56 @@ async def handle_yourname(
         f"💫 双方交换了所有额度和卡牌，{minutes} 分钟后换回！期间双方不能再被你的名字影响。"
     )
 
-    task = asyncio.create_task(
-        _swap_back_later(message.channel, message.author, partner, client)
+    _record_body_swap(message.author.id, partner.id, message.channel.id)
+    asyncio.create_task(
+        _swap_back_later(message.channel, message.author, partner, client, YOURNAME_SWAP_SECONDS)
     )
-    _active_body_swaps[message.author.id] = task
-    _active_body_swaps[partner.id] = task
+
+
+async def restore_body_swaps(bot: discord.Client, client: httpx.AsyncClient) -> None:
+    """重启后恢复未完成的交换身体状态。"""
+    with sqlite3.connect(DB_PATH) as conn:
+        rows = conn.execute(
+            "SELECT user_a_id, user_b_id, channel_id, swap_at FROM body_swaps"
+        ).fetchall()
+
+    for user_a_id, user_b_id, channel_id, swap_at in rows:
+        elapsed = time.time() - swap_at
+        remaining = YOURNAME_SWAP_SECONDS - elapsed
+
+        channel = bot.get_channel(channel_id)
+        if channel is None:
+            try:
+                channel = await bot.fetch_channel(channel_id)
+            except discord.HTTPException:
+                _remove_body_swap(user_a_id, user_b_id)
+                continue
+
+        user_a = bot.get_user(user_a_id)
+        if user_a is None:
+            try:
+                user_a = await bot.fetch_user(user_a_id)
+            except discord.HTTPException:
+                _remove_body_swap(user_a_id, user_b_id)
+                continue
+
+        user_b = bot.get_user(user_b_id)
+        if user_b is None:
+            try:
+                user_b = await bot.fetch_user(user_b_id)
+            except discord.HTTPException:
+                _remove_body_swap(user_a_id, user_b_id)
+                continue
+
+        if remaining <= 0:
+            # 已超时，立即换回
+            if await _swap_bodies(user_a, user_b, client):
+                await channel.send(f"🌀 {user_a.mention} 和 {user_b.mention} 的身体换回来了！")
+            _remove_body_swap(user_a_id, user_b_id)
+        else:
+            asyncio.create_task(
+                _swap_back_later(channel, user_a, user_b, client, remaining)
+            )
 
 
 _init_db()

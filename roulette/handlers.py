@@ -77,6 +77,7 @@ from roulette.gacha import (
     handle_my_cards,
     handle_seduce,
     handle_yourname,
+    restore_body_swaps,
 )
 from roulette.leaderboard import handle_leaderboard
 from roulette.lottery import handle_lottery
@@ -112,6 +113,11 @@ def start_roulette(bot: "SukakaBot") -> None:
     asyncio.create_task(
         auto_heist_loop(bot, client),
         name="auto-heist-loop",
+    )
+
+    asyncio.create_task(
+        restore_body_swaps(bot, client),
+        name="restore-body-swaps",
     )
 
     @bot.event
