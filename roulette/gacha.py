@@ -15,6 +15,7 @@ import httpx
 
 from roulette.api import adjust_quota, query_quota, query_top_quota
 from roulette.bank import (
+    _add_balance,
     _get_balance,
     _set_balance,
     get_all_accounts_with_min_balance,
@@ -63,6 +64,7 @@ CARD_POOL: dict[str, tuple[str, str, int]] = {
     "notyet": ("时候未到", "梭哈归零时自动恢复 50 点", 10),
     "yourname": ("你的名字", "【超稀有道具】使用 `你的名字@某人` 和某人交换身体：双方交换所有额度/卡牌/银行存款，5 分钟后换回，期间双方不能再被你的名字影响", 1),
     "inflation": ("通货膨胀", "【特殊道具】若银行存在存款 > 3000 点的用户，所有人存款数值减半", 5),
+    "depositking": ("存为王", "【特殊道具】排行榜前十名用户自动存款一次（额度的 50% 存入银行）", 5),
     "blank": ("空白", "无效果", 40),  # 实际概率由 GACHA_BLANK_CHANCE 控制
 }
 
@@ -371,6 +373,11 @@ async def handle_gacha(
         await _settle_inflation(message)
         return
 
+    # 存为王：立即结算，不存效果
+    if card_key == "depositking":
+        await _settle_depositking(message, client)
+        return
+
     # 所有卡牌均只生效 1 次
     _add_effect(message.author.id, card_key, 1)
     await message.channel.send(
@@ -417,6 +424,11 @@ async def _handle_multidraw(message: discord.Message, client: httpx.AsyncClient,
         if card_key == "inflation":
             lines.append(f"{i+1}. 💸 **{name}**！立即结算……")
             await _settle_inflation(message)
+            continue
+
+        if card_key == "depositking":
+            lines.append(f"{i+1}. 🏦 **{name}**！立即结算……")
+            await _settle_depositking(message, client)
             continue
 
         _add_effect(message.author.id, card_key, 1)
@@ -513,6 +525,49 @@ class SelfDestructPacketView(PacketView):
             packet_type="selfdestruct",
             split_mode="all",
         )
+
+
+async def _settle_depositking(message: discord.Message, client: httpx.AsyncClient) -> None:
+    """存为王：排行榜前十名用户自动存款一次（额度的 50% 存入银行）。"""
+    top_users = await query_top_quota(client)
+    if not top_users:
+        await message.channel.send("🏦 存为王失败：暂无排行数据。")
+        return
+
+    lines = [f"🏦 {message.author.mention} 抽中 **存为王**！前十名自动存款："]
+    deposited = 0
+    for username, quota in top_users[:10]:
+        if quota <= 0:
+            continue
+        amount = int(quota * 50 / 100)
+        if amount <= 0:
+            continue
+        result = await adjust_quota(client, "deduct", username, amount)
+        if result is None:
+            continue
+        # 找到 discord_id
+        guild = message.guild
+        discord_id = None
+        if guild:
+            member = guild.get_member_named(username)
+            if member is None:
+                member = discord.utils.find(
+                    lambda m: m.name == username or m.global_name == username,
+                    guild.members,
+                )
+            if member:
+                discord_id = member.id
+        if discord_id is None:
+            # 无法找到用户，退回额度
+            await adjust_quota(client, "grant", username, amount)
+            continue
+        _add_balance(discord_id, amount)
+        deposited += 1
+        lines.append(f"💰 {username} 存入 **{amount} 点**")
+
+    if deposited == 0:
+        lines.append("💨 前十名都身无分文，无人存款。")
+    await message.channel.send("\n".join(lines))
 
 
 async def _settle_inflation(message: discord.Message) -> None:
