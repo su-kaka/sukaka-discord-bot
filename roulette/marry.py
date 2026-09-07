@@ -74,10 +74,18 @@ class MarryView(discord.ui.View):
                     await interaction.response.send_message("结算失败，请稍后再试。", ephemeral=True)
                     return
 
-        # 因为爱情：求婚方持有时，获得对方所有额度
+        # 因为爱情：双方都有时抵消，否则求婚方获得对方所有额度
         from roulette.gacha import consume_effect
         forlove_note = ""
-        if consume_effect(self.proposer.id, "forlove"):
+        proposer_forlove = consume_effect(self.proposer.id, "forlove")
+        partner_forlove = consume_effect(self.partner.id, "forlove")
+        if proposer_forlove and partner_forlove:
+            share = (total - fee) // 2
+            bonus = (total - fee) % 2
+            p_share = share + bonus
+            q_share = share
+            forlove_note = "\n💕💕 双方都有**因为爱情**，互相抵消！正常平分！"
+        elif proposer_forlove:
             p_share, q_share = total - fee, 0
             forlove_note = f"\n💕 **因为爱情**生效！{self.proposer.mention} 获得对方所有额度！"
         else:

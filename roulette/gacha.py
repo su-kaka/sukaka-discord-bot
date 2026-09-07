@@ -680,9 +680,17 @@ async def handle_seduce(
                 await message.channel.send("💘 结算失败，请稍后再试。")
                 return
 
-    # 因为爱情：被诱惑方持有时，获得对方（诱惑方）所有额度
+    # 因为爱情：双方都有时抵消，否则被诱惑方获得对方所有额度
     forlove_note = ""
-    if consume_effect(partner.id, "forlove"):
+    author_forlove = consume_effect(message.author.id, "forlove")
+    partner_forlove = consume_effect(partner.id, "forlove")
+    if author_forlove and partner_forlove:
+        share = (total - fee) // 2
+        bonus = (total - fee) % 2
+        p_share = share + bonus
+        q_share = share
+        forlove_note = "\n💕💕 双方都有**因为爱情**，互相抵消！正常平分！"
+    elif partner_forlove:
         p_share, q_share = 0, total - fee
         forlove_note = f"\n💕 **因为爱情**生效！{partner.mention} 获得对方所有额度！"
     else:
