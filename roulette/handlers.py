@@ -361,12 +361,12 @@ def start_roulette(bot: "SukakaBot") -> None:
                 success = retry_success
 
             if success:
-                multiplier = 4 if heaven else 2
+                multiplier = 3 if heaven else 2
                 gross_prize = stake * multiplier
                 fee = int(gross_prize * ALLIN_FEE_PERCENT / 100)
                 prize = gross_prize - fee
                 new_quota = await adjust_quota(client, "grant", message.author.name, prize)
-                heaven_note = "\n🃏 一念天堂生效！成功概率提升，翻四倍！" if heaven else ""
+                heaven_note = "\n🃏 一念天堂生效！成功概率提升，翻三倍！" if heaven else ""
                 if new_quota is None:
                     await message.channel.send(
                         f"🎰 {message.author.mention} 梭哈 **{quota} 点** 翻倍成功！"
