@@ -14,7 +14,12 @@ import discord
 import httpx
 
 from roulette.api import adjust_quota, query_quota, query_top_quota
-from roulette.bank import _get_balance, _set_balance, has_royal_security_service
+from roulette.bank import (
+    _get_balance,
+    _set_balance,
+    get_all_accounts_with_min_balance,
+    has_royal_security_service,
+)
 from roulette.constants import (
     BANK_ROYAL_SECURITY_THRESHOLD,
     GACHA_BLANK_CHANCE,
@@ -57,6 +62,7 @@ CARD_POOL: dict[str, tuple[str, str, int]] = {
     "taxevasion": ("偷税漏税", "下次取钱手续费为 0", 10),
     "notyet": ("时候未到", "梭哈归零时自动恢复 50 点", 10),
     "yourname": ("你的名字", "【超稀有道具】使用 `你的名字@某人` 和某人交换身体：双方交换所有额度/卡牌/银行存款，5 分钟后换回，期间双方不能再被你的名字影响", 1),
+    "inflation": ("通货膨胀", "【特殊道具】若银行存在存款 > 3000 点的用户，所有人存款数值减半", 5),
     "blank": ("空白", "无效果", 40),  # 实际概率由 GACHA_BLANK_CHANCE 控制
 }
 
@@ -360,6 +366,11 @@ async def handle_gacha(
         await _settle_error(message, client)
         return
 
+    # 通货膨胀：立即结算，不存效果
+    if card_key == "inflation":
+        await _settle_inflation(message)
+        return
+
     # 所有卡牌均只生效 1 次
     _add_effect(message.author.id, card_key, 1)
     await message.channel.send(
@@ -401,6 +412,11 @@ async def _handle_multidraw(message: discord.Message, client: httpx.AsyncClient,
         if card_key == "error":
             lines.append(f"{i+1}. 💥 **{name}**！立即结算……")
             await _settle_error(message, client)
+            continue
+
+        if card_key == "inflation":
+            lines.append(f"{i+1}. 💸 **{name}**！立即结算……")
+            await _settle_inflation(message)
             continue
 
         _add_effect(message.author.id, card_key, 1)
@@ -497,6 +513,26 @@ class SelfDestructPacketView(PacketView):
             packet_type="selfdestruct",
             split_mode="all",
         )
+
+
+async def _settle_inflation(message: discord.Message) -> None:
+    """通货膨胀：若存在存款 > 3000 的用户，所有人存款减半。"""
+    accounts = get_all_accounts_with_min_balance(1)
+    if not accounts:
+        await message.channel.send("💸 银行空无一人，通货膨胀无效果。")
+        return
+
+    has_rich = any(balance > 3000 for _, balance in accounts)
+    if not has_rich:
+        await message.channel.send("💸 银行没有存款超过 3000 点的用户，通货膨胀无效果。")
+        return
+
+    for discord_id, balance in accounts:
+        _set_balance(discord_id, balance // 2)
+
+    await message.channel.send(
+        f"💸 {message.author.mention} 抽中 **通货膨胀**！所有人存款减半！"
+    )
 
 
 async def _settle_selfdestruct(message: discord.Message, client: httpx.AsyncClient) -> None:
