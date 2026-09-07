@@ -198,13 +198,15 @@ class BankHeistView(discord.ui.View):
 
         success_rate = min(success_rate, 95)  # 上限 95%
 
-        # 优先选取存款最多的目标（排除发起人和队员自己的银行账户）
+        # 优先选取存款最多的目标（排除发起人和队员自己的银行账户，以及下线用户）
+        from roulette.gacha import is_offline
+
         member_ids = {self.leader.id} | {user.id for user, _, _ in self.members}
         # 取存款最多的前 30 个候选（含队员排除冗余），再按存款排序选 1-10 个
         candidates = [
             (discord_id, balance)
             for discord_id, balance in get_richest_accounts(BANK_HEIST_MIN_BALANCE, 30)
-            if discord_id not in member_ids
+            if discord_id not in member_ids and not is_offline(discord_id)
         ]
         if not candidates:
             await self.message.channel.send(

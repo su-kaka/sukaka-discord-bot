@@ -7,7 +7,7 @@ import httpx
 
 from roulette.api import query_top_quota
 from roulette.constants import LEADERBOARD_TOP_N
-from roulette.gacha import get_snake_charm_holder
+from roulette.gacha import get_snake_charm_holder, is_offline
 
 
 async def handle_leaderboard(message: discord.Message, client: httpx.AsyncClient) -> None:
@@ -39,6 +39,9 @@ async def handle_leaderboard(message: discord.Message, client: httpx.AsyncClient
             if member:
                 display = member.mention
         if member and snake_holder and member.id == snake_holder:
+            continue
+        # 下线状态：不出现在排行榜
+        if member and is_offline(member.id):
             continue
         rank += 1
         medal = {1: "🥇", 2: "🥈", 3: "🥉"}.get(rank, f"{rank}.")

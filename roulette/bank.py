@@ -239,9 +239,14 @@ def _repay_loan(discord_id: int, amount: int) -> tuple[int, int, int]:
 
 
 def _pick_lender(exclude_id: int) -> Optional[tuple[int, int]]:
-    """随机选一个存款 ≥ BANK_LOAN_MIN_LENDER_BALANCE 的借款账号。"""
+    """随机选一个存款 ≥ BANK_LOAN_MIN_LENDER_BALANCE 的借款账号（排除下线用户）。"""
+    from roulette.gacha import is_offline
+
     candidates = get_all_accounts_with_min_balance(BANK_LOAN_MIN_LENDER_BALANCE)
-    candidates = [(did, bal) for did, bal in candidates if did != exclude_id]
+    candidates = [
+        (did, bal) for did, bal in candidates
+        if did != exclude_id and not is_offline(did)
+    ]
     if not candidates:
         return None
     return random.choice(candidates)

@@ -155,6 +155,12 @@ async def _queue_notification(channel: discord.abc.Messageable, text: str) -> No
 
 async def handle_drop_message(client: httpx.AsyncClient, message: discord.Message) -> None:
     """处理一条发言的掉落逻辑（由统一的消息入口调用）。"""
+    # 下线状态：无法发言掉落额度（延迟导入避免循环依赖）
+    from roulette.gacha import is_offline
+
+    if is_offline(message.author.id):
+        return
+
     discord_id = str(message.author.id)
     username = message.author.name
 

@@ -53,6 +53,7 @@ from roulette.constants import (
     MARRY_KEYWORD,
     MARRY_MIN_FEE,
     MARRY_TIMEOUT_SECONDS,
+    OFFLINE_KEYWORD,
     PLAYER_COUNT,
     QUOTA_CHANNEL_ID,
     RED_PACKET_COOLDOWN_SECONDS,
@@ -72,11 +73,14 @@ from roulette.curse import handle_curse
 from roulette.dice_game import DiceGame
 from roulette.duel import DuelView
 from roulette.gacha import (
+    clear_offline,
     consume_effect,
     handle_gacha,
     handle_my_cards,
+    handle_offline,
     handle_seduce,
     handle_yourname,
+    is_offline,
     restore_body_swaps,
 )
 from roulette.leaderboard import handle_leaderboard
@@ -129,6 +133,15 @@ def start_roulette(bot: "SukakaBot") -> None:
 
         content = message.content.strip()
 
+        # 下线状态：任意发言解除下线，本次发言不触发额度掉落
+        skip_drop = False
+        if is_offline(message.author.id):
+            clear_offline(message.author.id)
+            skip_drop = True
+            await message.channel.send(
+                f"🔌 {message.author.mention} 发言解除了下线状态！"
+            )
+
         # 结婚：结婚 @某人
         if content.startswith(MARRY_KEYWORD):
             if not message.mentions:
@@ -143,6 +156,9 @@ def start_roulette(bot: "SukakaBot") -> None:
                 return
             if partner.bot:
                 await message.channel.send("💍 不能和机器人结婚。")
+                return
+            if is_offline(partner.id):
+                await message.channel.send(f"🔌 {partner.mention} 处于下线状态，无法被选择！")
                 return
             now = time.monotonic()
             cooldown_until = marry_cooldowns.get(message.author.id, 0.0)
@@ -182,6 +198,9 @@ def start_roulette(bot: "SukakaBot") -> None:
                 return
             if opponent.bot:
                 await message.channel.send("⚔️ 不能和机器人决斗。")
+                return
+            if is_offline(opponent.id):
+                await message.channel.send(f"🔌 {opponent.mention} 处于下线状态，无法被选择！")
                 return
             now = time.monotonic()
             cooldown_until = duel_cooldowns.get(message.author.id, 0.0)
@@ -288,6 +307,11 @@ def start_roulette(bot: "SukakaBot") -> None:
         # 你的名字：交换身体，5 分钟后换回
         if content.startswith(YOURNAME_KEYWORD):
             await handle_yourname(message, client)
+            return
+
+        # 下线：使用下线卡，额度重置为 500，存款清空，进入下线状态
+        if content == OFFLINE_KEYWORD:
+            await handle_offline(message, client)
             return
 
         # 梭哈：全部额度押上，扣 2 点手续费后 50% 翻倍或清零
@@ -472,7 +496,8 @@ def start_roulette(bot: "SukakaBot") -> None:
                 current_banker["banker"] = None
             return
 
-        await handle_drop_message(client, message)
+        if not skip_drop:
+            await handle_drop_message(client, message)
 
     print(f"[DiceGame] 已启动，在频道 {QUOTA_CHANNEL_ID} 发送「{TRIGGER_KEYWORD}」与庄家对赌，发送「{BANKER_KEYWORD}」成为庄家")
     print(

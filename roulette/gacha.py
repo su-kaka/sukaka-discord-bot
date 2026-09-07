@@ -35,6 +35,8 @@ from roulette.constants import (
     GACHA_SELFDESTRUCT_MIN_PERCENT,
     MARRY_FEE_PERCENT,
     MARRY_MIN_FEE,
+    OFFLINE_MIN_QUOTA,
+    OFFLINE_RESET_QUOTA,
     YOURNAME_SWAP_SECONDS,
 )
 from roulette.packet_base import PacketView
@@ -65,6 +67,7 @@ CARD_POOL: dict[str, tuple[str, str, int]] = {
     "yourname": ("你的名字", "【超稀有道具】使用 `你的名字@某人` 和某人交换身体：双方交换所有额度/卡牌/银行存款，5 分钟后换回，期间双方不能再被你的名字影响", 1),
     "inflation": ("通货膨胀", "【特殊道具】若银行存在存款 > 3000 点的用户，所有人存款数值减半", 5),
     "depositking": ("存为王", "【特殊道具】排行榜前十名用户自动存款一次（额度的 50% 存入银行）", 5),
+    "offline": ("下线", f"【特殊道具】额度超过 {OFFLINE_MIN_QUOTA} 才能使用：额度重置为 {OFFLINE_RESET_QUOTA}，银行存款清空，无法被任何交换选择、无法抢红包、无法发言掉落额度，下次任意发言解除下线状态", 5),
     "blank": ("空白", "无效果", 40),  # 实际概率由 GACHA_BLANK_CHANCE 控制
 }
 
@@ -112,6 +115,43 @@ def _init_db() -> None:
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS offline_users (
+                discord_id INTEGER PRIMARY KEY,
+                created_at REAL NOT NULL
+            )
+            """
+        )
+
+
+def set_offline(discord_id: int) -> None:
+    """标记用户进入下线状态。"""
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO offline_users (discord_id, created_at) VALUES (?, ?)",
+            (discord_id, time.time()),
+        )
+
+
+def is_offline(discord_id: int) -> bool:
+    """用户是否处于下线状态。"""
+    with sqlite3.connect(DB_PATH) as conn:
+        row = conn.execute(
+            "SELECT 1 FROM offline_users WHERE discord_id = ?",
+            (discord_id,),
+        ).fetchone()
+    return row is not None
+
+
+def clear_offline(discord_id: int) -> bool:
+    """解除用户下线状态，返回是否之前处于下线状态。"""
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.execute(
+            "DELETE FROM offline_users WHERE discord_id = ?",
+            (discord_id,),
+        )
+        return cursor.rowcount > 0
 
 
 def set_snake_charm_holder(discord_id: int) -> None:
@@ -488,6 +528,9 @@ async def _settle_robinhood(message: discord.Message, client: httpx.AsyncClient)
             if member and has_snake_charm(member.id):
                 lines.append(f"🐍 {username} 持有蛇符咒，无法被劫富济贫！")
                 continue
+            if member and is_offline(member.id):
+                lines.append(f"🔌 {username} 处于下线状态，无法被劫富济贫！")
+                continue
         amount = random.randint(1, 10)
         stolen = min(int(quota * amount / 100), quota)
         deducted = await adjust_quota(client, "deduct", username, stolen)
@@ -556,6 +599,10 @@ async def _settle_depositking(message: discord.Message, client: httpx.AsyncClien
         # 蛇符咒：不受影响
         if has_snake_charm(discord_id):
             lines.append(f"🐍 {username} 持有蛇符咒，不受影响！")
+            continue
+        # 下线状态：不受影响
+        if is_offline(discord_id):
+            lines.append(f"🔌 {username} 处于下线状态，不受影响！")
             continue
         amount = int(quota * 50 / 100)
         if amount <= 0:
@@ -639,6 +686,9 @@ async def handle_seduce(
         return
     if partner.bot:
         await message.channel.send("💘 不能对机器人使用诱惑。")
+        return
+    if is_offline(partner.id):
+        await message.channel.send(f"🔌 {partner.mention} 处于下线状态，无法被诱惑！")
         return
     if has_royal_security_service(partner.id):
         await message.channel.send(
@@ -837,6 +887,9 @@ async def handle_yourname(
     if is_body_swapped(message.author.id) or is_body_swapped(partner.id):
         await message.channel.send("🌀 其中一方正在交换身体中，期间不能再被你的名字影响！")
         return
+    if is_offline(partner.id):
+        await message.channel.send(f"🔌 {partner.mention} 处于下线状态，无法被交换选择！")
+        return
     if not consume_effect(message.author.id, "yourname"):
         await message.channel.send("🌀 你没有生效中的「你的名字」卡。")
         return
@@ -901,6 +954,54 @@ async def restore_body_swaps(bot: discord.Client, client: httpx.AsyncClient) -> 
             asyncio.create_task(
                 _swap_back_later(channel, user_a, user_b, client, remaining)
             )
+
+
+async def handle_offline(
+    message: discord.Message,
+    client: httpx.AsyncClient,
+) -> None:
+    """下线卡：额度超过 500 才能使用，额度重置为 500，银行存款清空，进入下线状态。"""
+    if not consume_effect(message.author.id, "offline"):
+        await message.channel.send("🔌 你没有生效中的「下线」卡。")
+        return
+
+    quota = await query_quota(client, message.author.name)
+    if quota is None:
+        await message.channel.send("🔌 查询额度失败，请稍后再试。")
+        return
+    if quota <= OFFLINE_MIN_QUOTA:
+        # 额度不足，返还卡牌
+        _add_effect(message.author.id, "offline", 1)
+        await message.channel.send(
+            f"🔌 额度不足：当前 {quota} 点，使用「下线」需要额度超过 {OFFLINE_MIN_QUOTA} 点。"
+        )
+        return
+
+    # 额度重置为 500：先扣全部，再发 500
+    deducted = await adjust_quota(client, "deduct", message.author.name, quota)
+    if deducted is None:
+        _add_effect(message.author.id, "offline", 1)
+        await message.channel.send("🔌 扣除额度失败，请稍后再试。")
+        return
+    new_quota = await adjust_quota(client, "grant", message.author.name, OFFLINE_RESET_QUOTA)
+    if new_quota is None:
+        await message.channel.send("🔌 额度重置失败，请联系管理员。")
+        return
+
+    # 清空银行存款
+    old_balance = _get_balance(message.author.id)
+    _set_balance(message.author.id, 0)
+
+    # 进入下线状态
+    set_offline(message.author.id)
+
+    await message.channel.send(
+        f"🔌 {message.author.mention} 使用 **下线**！\n"
+        f"💥 额度从 **{quota} 点** 重置为 **{OFFLINE_RESET_QUOTA} 点**，"
+        f"银行存款 **{old_balance} 点** 已清空！\n"
+        f"📴 已进入下线状态：无法被任何交换选择、无法抢红包、无法发言掉落额度。\n"
+        f"💬 下次任意发言将解除下线状态。"
+    )
 
 
 _init_db()

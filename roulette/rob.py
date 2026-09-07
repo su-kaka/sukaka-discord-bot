@@ -19,7 +19,7 @@ from roulette.constants import (
     ROB_MIN_PERCENT,
     ROB_MIN_QUOTA,
 )
-from roulette.gacha import consume_effect, has_effect, steal_random_card
+from roulette.gacha import consume_effect, has_effect, is_offline, steal_random_card
 
 
 async def handle_rob(
@@ -43,6 +43,9 @@ async def handle_rob(
         return
     if target.bot:
         await message.channel.send("🔫 不能抢劫机器人。")
+        return
+    if is_offline(target.id):
+        await message.channel.send(f"🔌 {target.mention} 处于下线状态，无法被抢劫！")
         return
     if has_security_service(target.id):
         await message.channel.send(
@@ -76,11 +79,11 @@ async def handle_rob(
     scapegoat_note = ""
     if consume_effect(target.id, "scapegoat"):
         from roulette.bank import get_all_accounts_with_min_balance
-        # 从有存款的用户中随机选一个替罪羊（排除自己和抢劫者）
+        # 从有存款的用户中随机选一个替罪羊（排除自己、抢劫者和下线用户）
         accounts = get_all_accounts_with_min_balance(1)
         candidates = [
             uid for uid, _ in accounts
-            if uid != target.id and uid != message.author.id
+            if uid != target.id and uid != message.author.id and not is_offline(uid)
         ]
         if candidates:
             scapegoat_id = random.choice(candidates)

@@ -118,6 +118,14 @@ class PacketView(discord.ui.View):
         if user.bot:
             await interaction.response.send_message("机器人不能抢红包。", ephemeral=True)
             return
+        # 下线状态：无法抢红包（延迟导入避免循环依赖）
+        from roulette.gacha import is_offline
+
+        if is_offline(user.id):
+            await interaction.response.send_message(
+                "🔌 你处于下线状态，无法抢红包！发言可解除下线状态。", ephemeral=True
+            )
+            return
         if self.sender and user.id == self.sender.id:
             msg = "不能抢自己的红包。" if self.packet_type == "user" else "不能抢自己的自爆红包。"
             await interaction.response.send_message(msg, ephemeral=True)

@@ -10,6 +10,7 @@ import httpx
 
 from roulette.api import adjust_quota, query_quota
 from roulette.constants import CURSE_COOLDOWN_SECONDS, CURSE_COST, CURSE_KEYWORD
+from roulette.gacha import is_offline
 
 
 async def handle_curse(
@@ -31,6 +32,9 @@ async def handle_curse(
         return
     if target.bot:
         await message.channel.send("🔮 不能诅咒机器人。")
+        return
+    if is_offline(target.id):
+        await message.channel.send(f"🔌 {target.mention} 处于下线状态，无法被诅咒！")
         return
     if target.id in cursed_users:
         await message.channel.send(f"🔮 {target.mention} 已经身中诅咒了。")
@@ -64,11 +68,11 @@ async def handle_curse(
     from roulette.bank import get_all_accounts_with_min_balance
     scapegoat_note = ""
     if consume_effect(target.id, "scapegoat"):
-        # 从有存款的用户中随机选一个替罪羊（排除自己和诅咒者）
+        # 从有存款的用户中随机选一个替罪羊（排除自己、诅咒者和下线用户）
         accounts = get_all_accounts_with_min_balance(1)
         candidates = [
             uid for uid, _ in accounts
-            if uid != target.id and uid != message.author.id
+            if uid != target.id and uid != message.author.id and not is_offline(uid)
         ]
         if candidates:
             scapegoat_id = random.choice(candidates)
