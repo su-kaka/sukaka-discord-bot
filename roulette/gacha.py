@@ -539,12 +539,6 @@ async def _settle_depositking(message: discord.Message, client: httpx.AsyncClien
     for username, quota in top_users[:10]:
         if quota <= 0:
             continue
-        amount = int(quota * 50 / 100)
-        if amount <= 0:
-            continue
-        result = await adjust_quota(client, "deduct", username, amount)
-        if result is None:
-            continue
         # 找到 discord_id
         guild = message.guild
         discord_id = None
@@ -558,8 +552,16 @@ async def _settle_depositking(message: discord.Message, client: httpx.AsyncClien
             if member:
                 discord_id = member.id
         if discord_id is None:
-            # 无法找到用户，退回额度
-            await adjust_quota(client, "grant", username, amount)
+            continue
+        # 蛇符咒：不受影响
+        if has_snake_charm(discord_id):
+            lines.append(f"🐍 {username} 持有蛇符咒，不受影响！")
+            continue
+        amount = int(quota * 50 / 100)
+        if amount <= 0:
+            continue
+        result = await adjust_quota(client, "deduct", username, amount)
+        if result is None:
             continue
         _add_balance(discord_id, amount)
         deposited += 1
