@@ -12,11 +12,9 @@ from dotenv import load_dotenv
 
 from carousel import start_carousel
 from channel_admin import (
-    ChannelMuteRecord,
     VoteState,
-    load_channel_mutes,
     register_commands,
-    schedule_channel_mute_restore,
+    start_channel_mute_restores,
 )
 from mama import start_mama
 from roulette import start_roulette
@@ -70,9 +68,6 @@ class SukakaBot(discord.Client):
         self.tree = app_commands.CommandTree(self)
         self.mute_votes: dict[str, VoteState] = {}
         self.active_vote_by_target: dict[tuple[int, int], str] = {}
-        self.channel_mutes: dict[tuple[int, int, int], ChannelMuteRecord] = {}
-        self.channel_mute_tasks: dict[tuple[int, int, int], asyncio.Task[None]] = {}
-        self.channel_mute_lock = asyncio.Lock()
         # 消息分发注册表：频道 ID -> 各模块注册的处理器列表
         self.message_handlers: dict[int, list[MessageHandler]] = defaultdict(list)
         self._synced = False
@@ -81,7 +76,6 @@ class SukakaBot(discord.Client):
         self._carousel_task: Optional[asyncio.Task[None]] = None
         self._roulette_started = False
         self._mama_started = False
-        load_channel_mutes(self)
 
     async def setup_hook(self) -> None:
         register_commands(self)
@@ -103,8 +97,7 @@ class SukakaBot(discord.Client):
             self._synced = True
         if not self._channel_mutes_started:
             self._channel_mutes_started = True
-            for record in self.channel_mutes.values():
-                schedule_channel_mute_restore(self, record)
+            start_channel_mute_restores(self)
         if not self._carousel_started:
             self._carousel_started = True
             self._carousel_task = start_carousel(self)

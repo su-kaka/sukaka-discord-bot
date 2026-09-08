@@ -1,10 +1,10 @@
 import asyncio
-import json
 import os
 import re
+import sqlite3
 import time
 import uuid
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
@@ -18,8 +18,12 @@ ALLOWED_CHANNEL_ID = 1293095144806940738
 DEFAULT_TIMEOUT_MINUTES = 30
 MAX_TIMEOUT_MINUTES = 24 * 60
 VOTE_THRESHOLD = 5
-CHANNEL_MUTES_FILE = Path(os.getenv("CHANNEL_MUTES_FILE", "channel_mutes.json"))
+DB_PATH = Path(os.getenv("CHANNEL_MUTES_DB", "channel_mutes.db"))
 CHANNEL_MUTE_PERMISSIONS = ("send_messages",)
+
+# 恢复任务注册表与写锁：channel_admin 模块私有，不挂在 bot 实例上
+_restore_tasks: dict[tuple[int, int, int], asyncio.Task[None]] = {}
+_mute_lock = asyncio.Lock()
 
 MESSAGE_LINK_PATTERN = re.compile(
     r"^https?://(?:ptb\.|canary\.)?discord(?:app)?\.com/channels/(\d+)/(\d+)/(\d+)$"
@@ -96,30 +100,89 @@ def channel_mute_denial_reason(
     return None
 
 
-def load_channel_mutes(bot: "SukakaBot") -> None:
-    if not CHANNEL_MUTES_FILE.exists():
-        return
-    try:
-        raw_records = json.loads(CHANNEL_MUTES_FILE.read_text(encoding="utf-8"))
-        for raw_record in raw_records:
-            record = ChannelMuteRecord(**raw_record)
-            bot.channel_mutes[record.key] = record
-    except (OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
-        print(f"Failed to load channel mute state: {exc}")
+def _init_db() -> None:
+    """建表：频道禁言记录，主键 = (服务器, 频道, 成员)。"""
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS channel_mutes (
+                guild_id INTEGER NOT NULL,
+                channel_id INTEGER NOT NULL,
+                target_id INTEGER NOT NULL,
+                restore_at REAL NOT NULL,
+                original_allow INTEGER NOT NULL,
+                original_deny INTEGER NOT NULL,
+                PRIMARY KEY (guild_id, channel_id, target_id)
+            )
+            """
+        )
 
 
-def save_channel_mutes(bot: "SukakaBot") -> None:
-    temporary_file = CHANNEL_MUTES_FILE.with_name(f"{CHANNEL_MUTES_FILE.name}.tmp")
-    payload = [asdict(record) for record in bot.channel_mutes.values()]
-    temporary_file.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-    os.replace(temporary_file, CHANNEL_MUTES_FILE)
+def get_channel_mute(key: tuple[int, int, int]) -> Optional[ChannelMuteRecord]:
+    """查一条禁言记录，恢复任务轮询与复核用。"""
+    with sqlite3.connect(DB_PATH) as conn:
+        row = conn.execute(
+            "SELECT guild_id, channel_id, target_id, restore_at,"
+            " original_allow, original_deny FROM channel_mutes"
+            " WHERE guild_id = ? AND channel_id = ? AND target_id = ?",
+            key,
+        ).fetchone()
+    return ChannelMuteRecord(*row) if row else None
+
+
+def save_channel_mute(record: ChannelMuteRecord) -> None:
+    """插入或更新禁言记录（叠加禁言时只顺延 restore_at，原始权限保持首次保存的那份）。"""
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute(
+            """
+            INSERT INTO channel_mutes
+                (guild_id, channel_id, target_id, restore_at,
+                 original_allow, original_deny)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(guild_id, channel_id, target_id) DO UPDATE SET
+                restore_at = excluded.restore_at
+            """,
+            (
+                record.guild_id,
+                record.channel_id,
+                record.target_id,
+                record.restore_at,
+                record.original_allow,
+                record.original_deny,
+            ),
+        )
+
+
+def delete_channel_mute(key: tuple[int, int, int]) -> None:
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute(
+            "DELETE FROM channel_mutes"
+            " WHERE guild_id = ? AND channel_id = ? AND target_id = ?",
+            key,
+        )
+
+
+def load_all_channel_mutes() -> list[ChannelMuteRecord]:
+    """全部禁言记录，on_ready 重排恢复任务用。"""
+    with sqlite3.connect(DB_PATH) as conn:
+        rows = conn.execute(
+            "SELECT guild_id, channel_id, target_id, restore_at,"
+            " original_allow, original_deny FROM channel_mutes"
+        ).fetchall()
+    return [ChannelMuteRecord(*row) for row in rows]
+
+
+def start_channel_mute_restores(bot: "SukakaBot") -> None:
+    """重启恢复：为数据库里每条未到期记录重排恢复任务（on_ready 调用一次）。"""
+    records = load_all_channel_mutes()
+    for record in records:
+        schedule_channel_mute_restore(bot, record)
+    if records:
+        print(f"[ChannelAdmin] 已恢复 {len(records)} 条未到期的频道禁言记录")
 
 
 def schedule_channel_mute_restore(bot: "SukakaBot", record: ChannelMuteRecord) -> None:
-    existing_task = bot.channel_mute_tasks.pop(record.key, None)
+    existing_task = _restore_tasks.pop(record.key, None)
     if existing_task is not None:
         existing_task.cancel()
 
@@ -127,10 +190,9 @@ def schedule_channel_mute_restore(bot: "SukakaBot", record: ChannelMuteRecord) -
         restore_channel_mute_when_due(bot, record.key),
         name=f"channel-mute-restore-{record.channel_id}-{record.target_id}",
     )
-    bot.channel_mute_tasks[record.key] = task
+    _restore_tasks[record.key] = task
     task.add_done_callback(
         lambda completed, key=record.key: discard_channel_mute_task(
-            bot,
             key,
             completed,
         )
@@ -138,12 +200,11 @@ def schedule_channel_mute_restore(bot: "SukakaBot", record: ChannelMuteRecord) -
 
 
 def discard_channel_mute_task(
-    bot: "SukakaBot",
     key: tuple[int, int, int],
     completed_task: asyncio.Task[None],
 ) -> None:
-    if bot.channel_mute_tasks.get(key) is completed_task:
-        bot.channel_mute_tasks.pop(key, None)
+    if _restore_tasks.get(key) is completed_task:
+        _restore_tasks.pop(key, None)
 
 
 async def apply_channel_mute(
@@ -159,8 +220,8 @@ async def apply_channel_mute(
         raise ChannelMuteError(denied_message)
 
     key = guild.id, channel.id, member.id
-    async with bot.channel_mute_lock:
-        previous_record = bot.channel_mutes.get(key)
+    async with _mute_lock:
+        previous_record = get_channel_mute(key)
         if previous_record is None:
             original_overwrite = channel.overwrites_for(member)
             original_allow, original_deny = original_overwrite.pair()
@@ -173,15 +234,12 @@ async def apply_channel_mute(
                 original_deny=original_deny.value,
             )
         else:
-            record = ChannelMuteRecord(
-                **{
-                    **asdict(previous_record),
-                    "restore_at": time.time() + duration_minutes * 60,
-                }
+            record = replace(
+                previous_record,
+                restore_at=time.time() + duration_minutes * 60,
             )
 
-        bot.channel_mutes[key] = record
-        save_channel_mutes(bot)
+        save_channel_mute(record)
 
         muted_overwrite = channel.overwrites_for(member)
         for permission_name in CHANNEL_MUTE_PERMISSIONS:
@@ -195,10 +253,9 @@ async def apply_channel_mute(
             )
         except Exception:
             if previous_record is None:
-                bot.channel_mutes.pop(key, None)
+                delete_channel_mute(key)
             else:
-                bot.channel_mutes[key] = previous_record
-            save_channel_mutes(bot)
+                save_channel_mute(previous_record)
             raise
 
         schedule_channel_mute_restore(bot, record)
@@ -209,7 +266,7 @@ async def restore_channel_mute_when_due(
     key: tuple[int, int, int],
 ) -> None:
     while True:
-        record = bot.channel_mutes.get(key)
+        record = get_channel_mute(key)
         if record is None:
             return
 
@@ -218,8 +275,8 @@ async def restore_channel_mute_when_due(
             await asyncio.sleep(delay)
             continue
 
-        async with bot.channel_mute_lock:
-            record = bot.channel_mutes.get(key)
+        async with _mute_lock:
+            record = get_channel_mute(key)
             if record is None:
                 return
             if record.restore_at > time.time():
@@ -261,17 +318,18 @@ async def restore_channel_mute_when_due(
                     reason="Channel vote mute expired",
                 )
             except discord.NotFound:
-                bot.channel_mutes.pop(key, None)
-                save_channel_mutes(bot)
+                delete_channel_mute(key)
                 return
             except (ChannelMuteError, discord.Forbidden, discord.HTTPException) as exc:
                 print(f"Failed to restore channel mute {key}: {exc}")
             else:
-                bot.channel_mutes.pop(key, None)
-                save_channel_mutes(bot)
+                delete_channel_mute(key)
                 return
 
         await asyncio.sleep(60)
+
+
+_init_db()
 
 
 def is_allowed_channel(interaction: discord.Interaction) -> bool:

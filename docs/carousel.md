@@ -1,6 +1,6 @@
 # carousel.py — 频道轮播
 
-独立小模块（约 80 行，无其他依赖）：**每隔固定分钟数**，把 `carousel.txt` 的全部内容作为一条消息发到指定频道，并在下一个周期到来时自动删除旧消息（`delete_after`），实现「频道里始终只有一条轮播公告」的效果。
+独立小模块（约 80 行，无其他依赖）：**每隔固定分钟数**，把 `docs/carousel-content.md` 的全部内容作为一条消息发到指定频道，并在下一个周期到来时自动删除旧消息（`delete_after`），实现「频道里始终只有一条轮播公告」的效果。
 
 ## 工作方式
 
@@ -11,7 +11,7 @@ start_carousel(bot)  →  asyncio.create_task(carousel_loop(bot), name="carousel
 `carousel_loop` 是无限循环，每轮：
 
 1. 计算距下一个对齐时刻的秒数并 sleep（**对齐到墙钟时间**，例如间隔 10 分钟则固定在 10:00、10:10、10:20 发送，而不是「上一次发送后 10 分钟」）；
-2. 读取 `carousel.txt`（UTF-8）全文，为空则跳过本轮；
+2. 读取 `docs/carousel-content.md`（UTF-8）全文，为空则跳过本轮；
 3. 发送到 `CAROUSEL_CHANNEL_ID`，`delete_after=interval_minutes * 60`；
 4. 任何异常（文件不存在、频道找不到、Discord 报错）只 `print` 不中断循环。
 
@@ -20,16 +20,16 @@ start_carousel(bot)  →  asyncio.create_task(carousel_loop(bot), name="carousel
 | 变量 | 默认 | 说明 |
 | --- | --- | --- |
 | `CAROUSEL_CHANNEL_ID`（常量） | `1455038454772531311` | 目标频道，**改代码** |
-| `CAROUSEL_FILE`（env） | `carousel.txt` | 轮播内容文件路径 |
+| `CAROUSEL_FILE`（env） | `docs/carousel-content.md` | 轮播内容文件路径 |
 | `CAROUSEL_INTERVAL_MINUTES`（env） | `1` | 间隔分钟数，可为小数；非正数/非法值自动回退默认并打印警告 |
 
 ```env
 # .env 示例
-CAROUSEL_FILE=carousel.txt
+CAROUSEL_FILE=docs/carousel-content.md
 CAROUSEL_INTERVAL_MINUTES=1
 ```
 
-内容更新流程：直接编辑 `carousel.txt` 保存即可，**无需重启**——每轮发送前重新读文件。
+内容更新流程：直接编辑 `docs/carousel-content.md` 保存即可，**无需重启**——每轮发送前重新读文件。
 
 ## 关键实现细节
 
@@ -47,4 +47,4 @@ CAROUSEL_INTERVAL_MINUTES=1
 
 - **换频道**：改文件顶部 `CAROUSEL_CHANNEL_ID`。
 - **改间隔**：改 `.env` 的 `CAROUSEL_INTERVAL_MINUTES`，重启生效。
-- **多条轮播内容轮换**：把 `carousel.txt` 改成多段（如用 `---` 分隔），在 `carousel_loop` 里维护索引逐轮取下一段；或直接复制本模块做一个新的（见 [extending-guide.md](extending-guide.md)）。
+- **多条轮播内容轮换**：把 `docs/carousel-content.md` 改成多段（如用 `---` 分隔），在 `carousel_loop` 里维护索引逐轮取下一段；或直接复制本模块做一个新的（见 [extending-guide.md](extending-guide.md)）。

@@ -16,7 +16,7 @@
 - 通过消息链接删除消息
 - 通过消息链接标注消息（使用 Discord 置顶消息 / Pin）
 - 通过消息链接取消标注消息（取消置顶 / Unpin）
-- 每隔一段时间从 `carousel.txt` 向指定频道循环发送消息（默认 5 分钟）
+- 每隔一段时间从 `docs/carousel-content.md` 向指定频道循环发送消息（默认 5 分钟）
 - 发言随机掉落活动额度：在指定帖子发言随机掉落 0-5 点活动额度，单用户冷却 1-20 分钟，掉落时帖子内提醒并自动删除
 - 监听 0.0.0.0:7861，提供静态网页用于保活
 
@@ -37,8 +37,8 @@ pip install -r requirements.txt
 
 - DISCORD_TOKEN：Discord Bot Token
 - MUTE_WHITELIST：白名单用户 ID，多个用英文逗号分隔
-- CHANNEL_MUTES_FILE：可选，频道禁言恢复状态文件路径，默认 `channel_mutes.json`
-- CAROUSEL_FILE：可选，循环消息文件路径，默认 `carousel.txt`
+- CHANNEL_MUTES_DB：可选，频道禁言记录数据库路径，默认 `channel_mutes.db`
+- CAROUSEL_FILE：可选，循环消息文件路径，默认 `docs/carousel-content.md`
 - CAROUSEL_INTERVAL_MINUTES：可选，循环发送间隔（分钟），默认 `5`
 - ACTIVITY_QUOTA_API_KEY：活动额度发放专用密钥（必填，否则掉落功能不生效）
 - ACTIVITY_QUOTA_API_BASE：可选，活动额度 API 地址，默认 `https://catiecli.sukaka.top`
@@ -55,7 +55,7 @@ MUTE_WHITELIST=123456789012345678,234567890123456789
 
 - 如果 MUTE_WHITELIST 为空，则没有用户可以发起投票或执行管理指令；所有成员仍可参与已有投票。
 - 机器人仅在固定频道 1293095144806940738 接收与处理指令。
-- 机器人会向频道 `1455038454772531311` 循环发送 `carousel.txt` 的内容；文件为空时跳过本轮发送。
+- 机器人会向频道 `1455038454772531311` 循环发送 `docs/carousel-content.md` 的内容；文件为空时跳过本轮发送。
 - 掉落功能监听帖子 `1455038454772531311` 的用户发言（自动过滤机器人消息），每次发言随机掉落 0-5 点；无论掉落几点都会进入 1-20 分钟的随机冷却，冷却期间发言不再掉落。掉落成功时在帖子内 @用户 提醒，10 秒后自动删除。冷却记录存于 SQLite，重启后仍有效。
 
 ## 启动
@@ -169,7 +169,7 @@ https://discord.com/channels/<guild_id>/<channel_id>/<message_id>
 
 - 确认机器人在当前频道拥有 Manage Roles 权限
 - 服务器所有者和拥有 Administrator 权限的成员会绕过频道权限覆盖，无法被频道禁言
-- 检查 `CHANNEL_MUTES_FILE` 所在目录是否可写，以便到期后恢复原权限
+- 检查 `CHANNEL_MUTES_DB` 所在目录是否可写，以便到期后恢复原权限
 
 ## 项目文件
 

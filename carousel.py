@@ -6,7 +6,7 @@ from pathlib import Path
 import discord
 
 CAROUSEL_CHANNEL_ID = 1455038454772531311
-CAROUSEL_FILE = Path(os.getenv("CAROUSEL_FILE", "carousel.txt"))
+CAROUSEL_FILE = Path(os.getenv("CAROUSEL_FILE", "docs/carousel-content.md"))
 DEFAULT_CAROUSEL_INTERVAL_MINUTES = 1
 
 

@@ -16,6 +16,31 @@ if TYPE_CHECKING:
 MAMA_CHANNEL_ID = 1455038454772531311
 REGISTER_KEYWORD = "登记妈妈"
 FIND_KEYWORD = "找妈妈"
+GUIDE_KEYWORD = "组家庭教程"
+# 「组家庭教程」命令发送的教程文字（总结自 docs/family-group-guide.md，两边同步改）
+GUIDE_TEXT = """**👶 组家庭教程（Gemini Pro 家庭组共享）**
+
+已开通 Gemini Pro 的账号可创建家庭群组，邀请最多 5 个家人账号，全家共享 Gemini Pro；**成员之间额度彼此独立、互不影响**。
+
+**① 准备**
+- 管理员：已订阅 Gemini Pro 的账号。
+- 家人：**不用与管理员同区，不需要转区**。先关闭自己的付款资料：登录 payments.google.com →「设置」→ 在「付款资料状态」下选择「关闭付款资料」。
+
+**② 开通家庭**：管理员访问 https://g.co/yourfamily → 【开始使用】→【创建家人群组】→ 确认。
+
+**③ 添加家人**：家人管理界面点【发送邀请】输入家人邮箱 → 家人收到邮件点按钮 →【加入家庭】。**接受邀请前，把节点挂到管理员所在地区的 IP**，加入即可成功。
+
+**④ 开启共享**：管理员在 https://one.google.com/settings 开启「与家人共享 Google One」。完成后家人访问 https://gemini.google.com/ 即为 Pro。
+
+**⚠️ Antigravity（反重力）额度共享**
+Antigravity 额度同样走家庭组共享，**家庭组成员一定不能偷吃**——额度是共享池，家人用掉就没了，会消耗全家的额度。进了家庭组后不要私自使用 Antigravity，把额度留给需要的人。
+
+**加入失败常见原因**
+1. 家人号没关付款资料，或没挂管理员地区的节点。
+2. 退出过其他家庭群组不满 12 个月，不能加入新家庭。
+3. 自己已是别的家庭群组管理员（一人只能属一个家庭）。
+4. 玄学，换个时间再试。"""
+
 DB_PATH = Path(os.getenv("MAMA_DB", "mama.db"))
 
 PROMPT_DELETE_AFTER = 60  # 登记提示消息存活秒数
@@ -350,6 +375,13 @@ async def _handle_find(message: discord.Message) -> None:
     )
 
 
+async def _handle_guide(message: discord.Message) -> None:
+    """处理「组家庭教程」：发送组家庭教程文字（120 秒自动删）。"""
+    await message.channel.send(
+        GUIDE_TEXT, delete_after=LIST_DELETE_AFTER, allowed_mentions=discord.AllowedMentions.none()
+    )
+
+
 async def handle_mama_message(message: discord.Message) -> None:
     """找妈妈频道消息入口（由 bot.py 的消息分发调用）。"""
     # 防御性双检：正常情况下分发方已过滤
@@ -360,6 +392,8 @@ async def handle_mama_message(message: discord.Message) -> None:
         await _handle_register_prompt(message)
     elif content == FIND_KEYWORD:
         await _handle_find(message)
+    elif content == GUIDE_KEYWORD:
+        await _handle_guide(message)
     # 其他消息静默忽略
 
 
@@ -368,7 +402,8 @@ def start_mama(bot: "SukakaBot") -> None:
     bot.register_message_handler(MAMA_CHANNEL_ID, handle_mama_message)
     print(
         f"[Mama] 已启动，监听频道 {MAMA_CHANNEL_ID}，"
-        f"发送「{REGISTER_KEYWORD}」登记，发送「{FIND_KEYWORD}」查询，数据库 {DB_PATH}"
+        f"发送「{REGISTER_KEYWORD}」登记，发送「{FIND_KEYWORD}」查询，"
+        f"发送「{GUIDE_KEYWORD}」看教程，数据库 {DB_PATH}"
     )
 
 

@@ -44,8 +44,8 @@ MUTE_WHITELIST=123456789,987654321
 
 - **改的是频道级权限覆盖**（channel overwrite），不是服务器禁言。被投票者只是不能**在这个频道**发言。
 - **可叠加**：对同一人同一频道再次投票通过时，只更新 `restore_at`，原始权限仍是第一次保存的那份。
-- **恢复机制**：`schedule_channel_mute_restore` 为每条记录起一个 `asyncio.Task` 睡到 `restore_at` 恢复；恢复失败（权限丢失等）每 60 秒重试；`discord.NotFound`（成员/频道已消失）直接清理记录。
-- **持久化**：记录存 `channel_mutes.json`（`CHANNEL_MUTE_FILE` 可覆盖），原子写（先 `.tmp` 再 `os.replace`）。**重启恢复**：`bot.__init__` 里 `load_channel_mutes` 读文件，`on_ready` 里为每条记录重新排恢复任务——机器人重启不会丢失未到期的禁言。
+- **恢复机制**：`schedule_channel_mute_restore` 为每条记录起一个 `asyncio.Task` 睡到 `restore_at` 恢复；恢复失败（权限丢失等）每 60 秒重试；`discord.NotFound`（成员/频道已消失）直接清理记录。恢复任务注册表与写锁是模块级私有变量，不挂在 bot 上。
+- **持久化**：记录存 SQLite（`channel_mutes.db`，`CHANNEL_MUTES_DB` 可覆盖路径），主键 = (服务器, 频道, 成员)，叠加禁言只 `UPDATE restore_at`。**重启恢复**：`on_ready` 里 `start_channel_mute_restores` 读库为每条记录重排恢复任务——机器人重启不会丢失未到期的禁言。
 - **投票本身不持久化**：`mute_votes` / `active_vote_by_target` 只在内存。重启后旧投票消息的按钮会提示「此投票已不存在」。
 
 ## 频道禁言的额外校验（`channel_mute_denial_reason`）
@@ -81,7 +81,7 @@ https://discord.com/channels/<guild_id>/<channel_id>/<message_id>
 ## 与其他模块的关系
 
 - **注册时机**：`bot.py` 的 `setup_hook()` 调 `register_commands(bot)`（在 `on_ready` 的 `tree.sync()` 之前），命令通过全局斜杠命令同步生效。
-- **状态存放**：投票与禁言记录都挂在 `bot` 实例上（`bot.mute_votes` 等），见 [bot.md](bot.md) 的状态容器表。
+- **状态存放**：投票状态挂在 `bot` 实例上（`bot.mute_votes` 等），禁言记录存模块私有的 SQLite（见 [bot.md](bot.md) 的状态容器表）。
 - 与 roulette 的消息监听无任何交集：即使有人在游戏频道用这些命令，也会被 `deny_reason` 的频道检查挡掉。
 
 ## 常见改动

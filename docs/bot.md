@@ -26,7 +26,7 @@ main()
       │    └── register_commands(bot)     # channel_admin 的 4 个斜杠命令
       └── on_ready()（登录后，可能因重连多次触发）
            ├── await self.tree.sync()          # 同步斜杠命令到 Discord（仅首次）
-           ├── 恢复未到期的频道禁言            # schedule_channel_mute_restore
+           ├── 恢复未到期的频道禁言            # start_channel_mute_restores（读 channel_mutes.db）
            ├── start_carousel(self)             # 轮播任务
            └── start_roulette(self)             # 游戏区（含发言掉落、后台任务）
 ```
@@ -43,10 +43,9 @@ Discord 重连时 `on_ready` 会被再次调用。每个功能都对应一个 `s
 | --- | --- | --- |
 | `self.tree` | discord.py | 斜杠命令树 |
 | `self.mute_votes` / `self.active_vote_by_target` | channel_admin | 投票状态（内存态，重启丢失） |
-| `self.channel_mutes` / `self.channel_mute_tasks` / `self.channel_mute_lock` | channel_admin | 频道禁言记录（持久化到 `channel_mutes.json`） |
 | `self._carousel_task` | carousel | 轮播任务句柄 |
 
-roulette 模块没有往 bot 上挂状态——它的冷却字典等全部闭包在 `start_roulette()` 内部。
+roulette 模块没有往 bot 上挂状态——它的冷却字典等全部闭包在 `start_roulette()` 内部。channel_admin 的频道禁言记录也不再挂状态：持久层是模块私有的 SQLite 函数（`channel_mutes.db`），恢复任务注册表与写锁是模块级私有变量。
 
 ## Intents 配置
 

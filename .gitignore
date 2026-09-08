@@ -12,8 +12,6 @@ GEMINI.md
 .kiro
 # Environment configuration
 .env
-channel_mutes.json
-channel_mutes.json.tmp
 *.db
 
 # Python

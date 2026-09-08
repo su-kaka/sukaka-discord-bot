@@ -11,6 +11,7 @@ sukaka-discord-bot 是一个单进程 Discord 机器人（Python 3.13 + discord.
 | [carousel.md](carousel.md) | 频道轮播消息 | `carousel.py` |
 | [channel-admin.md](channel-admin.md) | 斜杠命令：禁言投票、删除/置顶消息 | `channel_admin.py` |
 | [mama.md](mama.md) | 找妈妈：家庭组共享登记（登记/查询按钮 + 弹窗表单） | `mama.py` |
+| [family-group-guide.md](family-group-guide.md) | 组家庭教程：Gemini Pro 家庭组共享步骤总结（「组家庭教程」命令的文案来源） | — |
 | [extending-guide.md](extending-guide.md) | **扩展指南：新增频道功能该怎么改** | — |
 
 ## 快速上手
@@ -33,15 +34,15 @@ python bot.py
 | --- | --- | --- | --- |
 | 游戏区（roulette） | `1545664527410929745` | 消息关键词（如「赌大小」「抽卡」） | message_content、members |
 | 频道轮播（carousel） | `1455038454772531311` | 定时任务，每分钟 | 无特殊要求 |
-| 找妈妈（mama） | `1455038454772531311` | 消息关键词「登记妈妈」「找妈妈」 | message_content |
+| 找妈妈（mama） | `1455038454772531311` | 消息关键词「登记妈妈」「找妈妈」「组家庭教程」 | message_content |
 | 管理命令（channel_admin） | `1293095144806940738` | 斜杠命令 `/mute_vote` `/delete_message` `/mark_message` `/unmark_message` | manage_roles、manage_messages |
 | Keepalive 服务器 | — | HTTP 0.0.0.0:7861 | — |
 
 ## 外部依赖
 
 - **活动额度 API**（`https://catiecli.sukaka.top`）：所有游戏点数的真实账本。机器人不自己记账（银行存款、卡牌、彩票奖池等本地 SQLite 除外），通过 `X-Activity-Quota-Key` 鉴权调用 grant/deduct/query/top 接口。接口详情见 [activity-quota-bot-api.md](activity-quota-bot-api.md)。
-- **SQLite 本地库**（项目根目录）：`gacha.db`（卡牌效果/下线状态/身体交换）、`bank.db`（银行存款/抢劫冷却）、`lottery.db`（奖池）、`quota_drops.db`（掉落冷却）、`mama.db`（家庭组登记）。
-- **数据文件**：`carousel.txt`（轮播内容，整个文件作为一条消息发送）。
+- **SQLite 本地库**（项目根目录）：`gacha.db`（卡牌效果/下线状态/身体交换）、`bank.db`（银行存款/抢劫冷却）、`lottery.db`（奖池）、`quota_drops.db`（掉落冷却）、`mama.db`（家庭组登记）、`channel_mutes.db`（频道禁言记录）。
+- **数据文件**：`docs/carousel-content.md`（轮播内容，整个文件作为一条消息发送）。
 
 ## 项目结构
 
