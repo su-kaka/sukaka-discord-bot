@@ -40,7 +40,7 @@ start_roulette(bot)
 
 ## 消息分发（handlers.py）
 
-`on_message` 开头两行先做过滤：**非游戏频道的消息直接 return；bot 自己的消息 return**。之后按顺序匹配关键词，命中即处理并 return。维护要点：
+消息入口是一个闭包函数 `on_message`，在 `start_roulette()` 末尾通过 `bot.register_message_handler(QUOTA_CHANNEL_ID, on_message)` 注册到 bot 的分发注册表（**唯一的 `@bot.event on_message` 在 bot.py**，见 [bot.md](bot.md)）。入口先做过滤：**非游戏频道的消息直接 return**（bot 自己的消息已在 bot.py 分发前统一过滤）。之后按顺序匹配关键词，命中即处理并 return。维护要点：
 
 1. **关键词匹配是顺序敏感的**：`content.startswith(...)` 类（结婚/诅咒/决斗/抢劫/诱惑/你的名字）和 `content == ...` 类（其余）混排，新增关键词注意别被已有的前缀规则截胡。
 2. **冷却字典全部闭包在 `start_roulette()` 里**（`beg_cooldowns`、`duel_cooldowns` 等 dict[int, float]，存 `time.monotonic()` 到期时间），通过 `on_finish` 回调传给各 View 在结束时写入。重启即清零，属可接受设计。

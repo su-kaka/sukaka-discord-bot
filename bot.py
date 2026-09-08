@@ -1,9 +1,10 @@
 import asyncio
 import os
+from collections import defaultdict
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Thread
-from typing import Optional
+from typing import Awaitable, Callable, Optional
 
 import discord
 from discord import app_commands
@@ -17,12 +18,16 @@ from channel_admin import (
     register_commands,
     schedule_channel_mute_restore,
 )
+from mama import start_mama
 from roulette import start_roulette
 
 load_dotenv()
 
 KEEPALIVE_HOST = "0.0.0.0"
 KEEPALIVE_PORT = 7861
+
+# 消息处理器：频道 ID -> [async (message) -> None]，各模块在 start_xxx 里注册
+MessageHandler = Callable[[discord.Message], Awaitable[None]]
 
 
 class KeepAliveHandler(BaseHTTPRequestHandler):
@@ -68,15 +73,29 @@ class SukakaBot(discord.Client):
         self.channel_mutes: dict[tuple[int, int, int], ChannelMuteRecord] = {}
         self.channel_mute_tasks: dict[tuple[int, int, int], asyncio.Task[None]] = {}
         self.channel_mute_lock = asyncio.Lock()
+        # 消息分发注册表：频道 ID -> 各模块注册的处理器列表
+        self.message_handlers: dict[int, list[MessageHandler]] = defaultdict(list)
         self._synced = False
         self._channel_mutes_started = False
         self._carousel_started = False
         self._carousel_task: Optional[asyncio.Task[None]] = None
         self._roulette_started = False
+        self._mama_started = False
         load_channel_mutes(self)
 
     async def setup_hook(self) -> None:
         register_commands(self)
+
+    def register_message_handler(self, channel_id: int, handler: MessageHandler) -> None:
+        """注册某频道的消息处理器。各功能模块在 start_xxx 里调用，自行声明监听的频道。"""
+        self.message_handlers[channel_id].append(handler)
+
+    async def on_message(self, message: discord.Message) -> None:
+        """唯一的消息入口：按频道分发给注册了该频道的模块。"""
+        if message.author.bot:
+            return
+        for handler in self.message_handlers.get(message.channel.id, ()):
+            await handler(message)
 
     async def on_ready(self) -> None:
         if not self._synced:
@@ -92,6 +111,9 @@ class SukakaBot(discord.Client):
         if not self._roulette_started:
             self._roulette_started = True
             start_roulette(self)
+        if not self._mama_started:
+            self._mama_started = True
+            start_mama(self)
         print(f"Logged in as {self.user} ({self.user.id})")
 
 

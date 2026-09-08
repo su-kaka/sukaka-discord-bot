@@ -93,7 +93,7 @@ if TYPE_CHECKING:
 
 
 def start_roulette(bot: "SukakaBot") -> None:
-    """注册统一的消息入口：赌大小触发 + 发言掉落。"""
+    """注册游戏区的消息入口：赌大小触发 + 发言掉落。"""
     client = httpx.AsyncClient(timeout=API_TIMEOUT_SECONDS)
     current_banker: dict[str, Optional[discord.Member | discord.User]] = {"banker": None}
     active_begs: dict[int, BegView] = {}
@@ -125,11 +125,8 @@ def start_roulette(bot: "SukakaBot") -> None:
 
     start_quota_drop()
 
-    @bot.event
     async def on_message(message: discord.Message) -> None:
         if message.channel.id != QUOTA_CHANNEL_ID:
-            return
-        if message.author.bot:
             return
 
         content = message.content.strip()
@@ -515,6 +512,9 @@ def start_roulette(bot: "SukakaBot") -> None:
 
         if not skip_drop:
             await handle_drop_message(client, message)
+
+    # 消息入口注册到 bot 的分发注册表（bot.py 持有唯一的 on_message）
+    bot.register_message_handler(QUOTA_CHANNEL_ID, on_message)
 
     print(f"[DiceGame] 已启动，在频道 {QUOTA_CHANNEL_ID} 发送「{TRIGGER_KEYWORD}」与庄家对赌，发送「{BANKER_KEYWORD}」成为庄家")
     print(

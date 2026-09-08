@@ -74,6 +74,30 @@ intents.message_content = True   # 读取消息内容（游戏关键词识别必
 | `ACTIVITY_QUOTA_API_BASE` | 覆盖 API 地址（默认 `https://catiecli.sukaka.top`） | 用默认值 |
 | `MUTE_WHITELIST` | 管理命令的用户 ID 白名单（逗号分隔） | 无人可用管理命令 |
 
+## 消息分发机制（bot.py 持有唯一的 on_message）
+
+`SukakaBot` 上有一个**消息处理器注册表**，各功能模块在 `start_xxx(bot)` 里向 bot 注册自己监听的频道：
+
+```python
+# bot.py 的核心三件
+MessageHandler = Callable[[discord.Message], Awaitable[None]]
+
+self.message_handlers: dict[int, list[MessageHandler]] = defaultdict(list)  # 频道 ID -> 处理器列表
+
+def register_message_handler(self, channel_id: int, handler: MessageHandler) -> None: ...
+
+async def on_message(self, message: discord.Message) -> None:
+    """唯一的消息入口：按频道分发给注册了该频道的模块。"""
+    if message.author.bot:      # 挡住 carousel 轮播与 bot 自己的消息，防回环
+        return
+    for handler in self.message_handlers.get(message.channel.id, ()):
+        await handler(message)
+```
+
+- **`@bot.event` 是覆盖语义**（discord.py 单播），所以全项目只允许这一处 `on_message`；功能模块一律通过 `register_message_handler` 注册，bot 消息在分发前统一过滤。
+- 一个频道可以注册多个处理器（按注册顺序依次执行）；没有注册处理器的频道消息直接丢弃。
+- `roulette`（游戏频道 `1545664527410929745`）与 `mama`（找妈妈频道 `1455038454772531311`）都走这套机制。channel_admin 用斜杠命令、carousel 用定时任务，不参与消息分发。
+
 ## 新增功能模块时的改动点
 
 在本文件中只需三步（详细流程见 [extending-guide.md](extending-guide.md)）：
@@ -87,5 +111,7 @@ if not self._xxx_started:
     self._xxx_started = True
     start_xxx(self)
 ```
+
+新模块若要监听消息，在自己的 `start_xxx(bot)` 里调用 `bot.register_message_handler(频道ID, handler)`——不要注册第二个 `@bot.event on_message`。
 
 注意：如果新模块也用斜杠命令，注册放在 `setup_hook()`（调用模块的 `register_commands`），不要放 `on_ready`。
