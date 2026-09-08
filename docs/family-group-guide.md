@@ -15,10 +15,10 @@ Bot 每次触发命令时现场读取本文件，把 Markdown 渲染成 Discord 
 - **家庭管理员**：一个已订阅 Gemini Pro 的 Google 账号（订阅可用学生优惠等渠道）。
 - **查自己是哪个区**：https://policies.google.com/country-association-form （管理员把链接发给家人，确认要挂哪个地区的节点）。
 - **家人号需要转区到管理员所在地区**：删除付款资料后**光挂对应地区的 IP 可能不成功**，需要按以下步骤完整转区：
-  1. 登录要关闭的付款资料对应的账号，访问 https://payments.google.com；
+  1. 登录要关闭的付款资料对应的账号，访问 https://payments.google.com ；
   2. 进入「设置」；
   3. 在「付款资料状态」下选择「关闭付款资料」；
-  4. 在 https://mockaddress.com/ 获取一个**对应家庭组（管理员所在地区）的地址和虚拟卡**信息；
+  4. 在 https://mockaddress.com 获取一个**对应家庭组（管理员所在地区）的地址和虚拟卡**信息；
   5. 再次访问 https://payments.google.com ，用上一步获取的地址和虚拟卡**新建一个对应家庭组区域的付款资料**——这就算转区了。
 - 转区完成后，**把代理节点挂到家庭组管理员所在的地区 IP**，再接受邀请即可。
 
@@ -26,7 +26,7 @@ Bot 每次触发命令时现场读取本文件，把 Markdown 渲染成 Discord 
 
 1. **开通家庭**：管理员访问 https://g.co/yourfamily → 点【开始使用】→【创建家人群组】→ 确认。
 2. **添加家人**：在家人管理界面点【发送邀请】，输入家人邮箱；家人收到邮件后点按钮接受邀请 →【加入家庭】。
-3. **开启共享**：管理员在 https://one.google.com/settings 开启「与家人共享 Google One」。完成后家庭成员访问 https://gemini.google.com/ 即为 Pro 会员。
+3. **开启共享**：管理员在 https://one.google.com/settings 开启「与家人共享 Google One」。完成后家庭成员访问 https://gemini.google.com 即为 Pro 会员。
 
 ## Antigravity（反重力）额度共享
 
