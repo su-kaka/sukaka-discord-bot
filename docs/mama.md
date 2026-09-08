@@ -8,7 +8,7 @@
 | --- | --- |
 | `登记妈妈` | Bot 发一条 @你 的提示消息 + 两个按钮（60 秒自动删）。点【登记/更新我的登记】弹出 Modal 表单（区域必填、备注选填，已有登记时预填旧值），提交保存；点【删除我的登记】删除记录 |
 | `找妈妈` | Bot 发按区域分组的登记列表（每人一行 mention + 备注）+ 下拉菜单（120 秒自动删）。在菜单选中某人 → 仅你可见地显示对方登记，点击对方头像即可私信联系 |
-| `组家庭教程` | Bot 发一段 Gemini Pro 家庭组共享的图文教程（120 秒自动删）。教程总结存在 [family-group-guide.md](family-group-guide.md)，与 `mama.py` 顶部的 `GUIDE_TEXT` 常量对应，改教程两边同步 |
+| `家庭组教程` | Bot 发 Gemini Pro 家庭组共享教程（120 秒自动删）。教程源文件是 [family-group-guide.md](family-group-guide.md)，发送时现场把 Markdown 渲染成 Discord 文本（`#`→emoji 标题、`##`→加粗、`- `→•）——**改教程只改这一个文件，无需重启** |
 
 - 一人一条记录：重复登记即覆盖更新（保留首次登记时间，保证排序稳定）。
 - 联系方式不需要填：列表里 mention 点击头像即可私信。
@@ -40,6 +40,7 @@ bot.on_message（bot.py，全项目唯一）
   - `RegisterModal`：`__init__` 里动态构造 TextInput 并 `default` 预填（不用类属性——共享原型有串值风险）；`timeout=None` 弹窗不本地过期；`on_submit` 服务端复检（`required=True` 挡不住纯空格）并用 `" ".join(value.split())` 折叠空白（备注换行会破坏「每人一行」列表格式）。
   - `MamaSelect`/`MamaSelectView`：下拉菜单，回调时**重新查库**（列表发出后对方可能已删除登记）。
 - **渲染**：`_render_list_chunks` 按区域分组（dict 保插入序）+ 贪心 1800 字符分块（Discord 2000 上限留余量）；`_build_select_options` 截断前 25 条（Discord Select 硬上限），页脚注明。
+- **教程文案**：`_load_guide_text` 每次触发时现场读 `GUIDE_FILE`（`docs/family-group-guide.md`，env `MAMA_GUIDE_FILE` 可覆盖），做轻量 Markdown → Discord 文本转换（`# `→emoji 标题、`## `→加粗、`- `→•、HTML 注释整段丢弃、连续空行折叠）。**不缓存**：改教程文件即时生效，无需重启。
 
 ## 启动接线（bot.py）
 

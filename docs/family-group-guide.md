@@ -1,10 +1,19 @@
-# 组家庭教程（Gemini Pro 家庭组共享）
+# 家庭组教程（Gemini Pro 家庭组共享）
+
+<!--
+本文件既是团队文档，也是 mama.py「家庭组教程」命令的直接文案来源：
+Bot 每次触发命令时现场读取本文件，把 Markdown 渲染成 Discord 文本发送
+（# → emoji 标题、## → 加粗、- → •，HTML 注释不发送）。
+改教程只需要编辑本文件，无需重启 Bot。
+-->
+
 
 已开通 Gemini Pro 的 Google 账号可以创建家庭群组，邀请最多 5 个家人账号加入，全家都享受 Gemini Pro 会员；**家庭成员之间的 GEMINICLI Pro 额度彼此独立、互不影响**。
 
 ## 准备工作
 
 - **家庭管理员**：一个已订阅 Gemini Pro 的 Google 账号（订阅可用学生优惠等渠道）。
+- **查自己是哪个区**：https://policies.google.com/country-association-form （管理员把链接发给家人，确认要挂哪个地区的节点）。
 - **家人号不用与管理员同区**：不在一个国家/地区也没关系，**不需要转区**。让家人号**删除（关闭）自己的付款资料**即可：
   1. 登录要关闭的付款资料对应的账号，访问 https://payments.google.com；
   2. 进入「设置」；
