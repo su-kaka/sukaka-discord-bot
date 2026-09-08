@@ -10,8 +10,6 @@ from typing import TYPE_CHECKING, Optional
 import discord
 import httpx
 
-from quota_drop import handle_drop_message
-
 from roulette.api import adjust_quota, query_quota
 from roulette.beg import BegView
 from roulette.big_red_packet import big_red_packet_loop
@@ -86,6 +84,7 @@ from roulette.gacha import (
 from roulette.leaderboard import handle_leaderboard
 from roulette.lottery import handle_lottery
 from roulette.marry import MarryView
+from roulette.quota_drop import handle_drop_message, start_quota_drop
 from roulette.red_packet import RedPacketView
 from roulette.rob import handle_rob
 
@@ -123,6 +122,8 @@ def start_roulette(bot: "SukakaBot") -> None:
         restore_body_swaps(bot, client),
         name="restore-body-swaps",
     )
+
+    start_quota_drop()
 
     @bot.event
     async def on_message(message: discord.Message) -> None:
