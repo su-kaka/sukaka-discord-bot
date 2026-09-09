@@ -16,10 +16,8 @@ GCLI额度获取：
 - 上传一个pro凭证（学生pro或者企业pro） → 获得 **500 pro额度 3000点flash额度**（除了gemini pro模型可以额外吃kimi-k3 glm5.3 glm5.2 glm5.3f dsv4f）
 - 上传一个free凭证 可以吃flash（除了gemini flash模型可以额外吃glm5.2 glm5.3f dsv4f）
 
-未上传凭证的可以通过在 https://discord.com/channels/1134557553011998840/1545664527410929745 发言随机掉落额度：
-- 在游戏区发言即可随机掉落 0-50 点活动额度，掉落会有提醒。额度北京时间0点清空，每天不结余
-- 活动额度可用于使用国产模型，例如 kimi-k3、glm5.2、glm5.3、deepseek-4-flash-0731。
-- 掉落的额度可在网站主页查看
+### Telnyx反代服务
+- 站点主页左上角Telnyx密钥点进去有教程，自己吃自己，不限rpm （有moonshotai/Kimi-K3,zai-org/GLM-5.3,zai-org/GLM-5.2", zai-org/GLM-5.3-Flash,deepseek-ai/DeepSeek-V4-Flash-0731）
 
 找妈妈（家庭组互助）：
 - 想找人拉你进谷歌家庭组共享 Pro？在本频道发送「找妈妈」查看所有愿意分享位置的成员，在菜单里选一位直接私信联系
