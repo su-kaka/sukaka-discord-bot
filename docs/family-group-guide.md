@@ -13,9 +13,9 @@ Bot 每次触发命令时现场读取本文件，把 Markdown 渲染成 Discord 
 ## 准备工作
 
 - **家庭管理员**：一个已订阅 Gemini Pro 的 Google 账号（订阅可用学生优惠等渠道）。
-- **查自己是哪个区**：https://policies.google.com/country-association-form （管理员把链接发给家人，确认要挂哪个地区的节点）。
+- **查自己是哪个区**：https://policies.google.com/country-association-form
 - **家人号需要转区到管理员所在地区**：删除付款资料后**光挂对应地区的 IP 可能不成功**，需要按以下步骤完整转区：
-  1. 登录要关闭的付款资料对应的账号，访问 https://payments.google.com ；
+  1. 登录要关闭的付款资料对应的账号，访问 https://payments.google.com
   2. 进入「设置」；
   3. 在「付款资料状态」下选择「关闭付款资料」；
   4. 在 https://mockaddress.com 获取一个**对应家庭组（管理员所在地区）的地址和虚拟卡**信息；
