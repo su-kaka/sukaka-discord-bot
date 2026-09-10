@@ -13,8 +13,8 @@ GCLI 凭证报错：
 - 如果 GCLI 报错消息中包含 `Verify your account to continue.`，点击快验按钮，然后点击显示的链接完成验证即可。验证失败可以尝试这个方法：https://discord.com/channels/1134557553011998840/1543395896409071736
 
 GCLI额度获取：
-- 上传一个pro凭证（学生pro或者企业pro） → 获得 **500 pro额度 3000点flash额度**（除了gemini pro模型可以额外吃kimi-k3 glm5.3 glm5.2 glm5.3f dsv4f）
-- 上传一个free凭证 可以吃flash（除了gemini flash模型可以额外吃glm5.2 glm5.3f dsv4f）
+- 上传一个pro凭证（学生pro或者企业pro） → 获得 **500 pro额度 3000点flash额度**（除了gemini pro模型可以额外吃kimi-k3 glm5.2 glm5.3f dsv4f）
+- 上传一个free凭证 可以吃flash（除了gemini flash模型可以额外吃glm5.3f dsv4f）
 
 ### Telnyx反代服务
 - 站点主页左上角Telnyx密钥点进去有教程，自己吃自己，不限rpm （有moonshotai/Kimi-K3,zai-org/GLM-5.3,zai-org/GLM-5.2", zai-org/GLM-5.3-Flash,deepseek-ai/DeepSeek-V4-Flash-0731）
