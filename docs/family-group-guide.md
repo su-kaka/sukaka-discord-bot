@@ -18,7 +18,7 @@ Bot 每次触发命令时现场读取本文件，把 Markdown 渲染成 Discord 
   1. 登录要关闭的付款资料对应的账号，访问 https://payments.google.com
   2. 进入「设置」；
   3. 在「付款资料状态」下选择「关闭付款资料」；
-  4. 在 https://mockaddress.com 获取一个**对应家庭组（管理员所在地区）的地址和虚拟卡**信息；
+  4. 在 https://mockaddress.com 或者 https://www.meiguodizhi.com/ 获取一个**对应家庭组（管理员所在地区）的地址和虚拟卡**信息；
   5. 再次访问 https://payments.google.com ，用上一步获取的地址和虚拟卡**新建一个对应家庭组区域的付款资料**——这就算转区了。
 - 转区完成后，**把代理节点挂到家庭组管理员所在的地区 IP**，再接受邀请即可。
 
