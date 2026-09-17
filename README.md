@@ -1,6 +1,6 @@
 # Sukaka Discord Bot
 
-一个面向频道管理的 Discord 机器人，支持白名单权限控制、禁言投票、消息删除与消息标注，并提供本地保活静态页面。
+一个面向频道管理的 Discord 机器人，支持白名单权限控制、禁言投票、消息删除与消息标注。
 
 ## 功能
 
@@ -18,7 +18,6 @@
 - 通过消息链接取消标注消息（取消置顶 / Unpin）
 - 每隔一段时间从 `docs/carousel-content.md` 向指定频道循环发送消息（默认 5 分钟）
 - 发言随机掉落活动额度：在指定帖子发言随机掉落 0-5 点活动额度，单用户冷却 1-20 分钟，掉落时帖子内提醒并自动删除
-- 监听 0.0.0.0:7861，提供静态网页用于保活
 
 ## 运行环境
 
@@ -68,7 +67,6 @@ python bot.py
 
 - 登录 Discord Bot
 - 注册 Slash Commands
-- 启动本地保活页面：http://0.0.0.0:7861
 
 ## 指令说明
 
@@ -145,11 +143,6 @@ https://discord.com/channels/<guild_id>/<channel_id>/<message_id>
 - Manage Roles（用于修改和恢复成员在当前频道的发言权限）
 
 另外需要在 [Discord Developer Portal](https://discord.com/developers/applications) → Bot → Privileged Gateway Intents 开启 **Message Content Intent**，否则发言掉落功能无法接收消息事件。
-
-## 保活页面
-
-- 监听地址：0.0.0.0:7861
-- 页面用途：提供轻量静态页面，便于外部探活或平台保活
 
 ## 常见问题
 

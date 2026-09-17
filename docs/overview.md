@@ -6,7 +6,7 @@ sukaka-discord-bot 是一个单进程 Discord 机器人（Python 3.13 + discord.
 
 | 文档 | 内容 | 对应代码 |
 | --- | --- | --- |
-| [bot.md](bot.md) | 主入口、启动流程、Keepalive 服务器 | `bot.py` |
+| [bot.md](bot.md) | 主入口、启动流程 | `bot.py` |
 | [roulette.md](roulette.md) | 游戏区：赌大小、抽卡、银行、红包等全部小游戏 | `roulette/` 包 |
 | [carousel.md](carousel.md) | 频道轮播消息 | `carousel.py` |
 | [channel-admin.md](channel-admin.md) | 斜杠命令：禁言投票、删除/置顶消息 | `channel_admin.py` |
@@ -36,7 +36,6 @@ python bot.py
 | 频道轮播（carousel） | `1455038454772531311` | 定时任务，每分钟 | 无特殊要求 |
 | 找妈妈（mama） | `1455038454772531311` | 消息关键词「登记妈妈」「找妈妈」「家庭组教程」 | message_content |
 | 管理命令（channel_admin） | `1293095144806940738` | 斜杠命令 `/mute_vote` `/delete_message` `/mark_message` `/unmark_message` | manage_roles、manage_messages |
-| Keepalive 服务器 | — | HTTP 0.0.0.0:7861 | — |
 
 ## 外部依赖
 
@@ -47,7 +46,7 @@ python bot.py
 ## 项目结构
 
 ```
-bot.py                  # 主入口：Client 子类、启动编排、Keepalive
+bot.py                  # 主入口：Client 子类、启动编排
 carousel.py             # 频道轮播（独立模块）
 channel_admin.py        # 斜杠命令注册 + 频道禁言投票（独立模块）
 mama.py                 # 找妈妈：家庭组共享登记（独立模块，消息由 handlers.py 转发）

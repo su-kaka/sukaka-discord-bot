@@ -1,14 +1,12 @@
 # bot.py — 主入口
 
-`bot.py` 是整个机器人的唯一启动文件（`python bot.py`），职责只有三件事：加载环境变量、启动 Keepalive HTTP 服务器、把四大功能模块挂到机器人上。它本身不含任何业务逻辑。
+`bot.py` 是整个机器人的唯一启动文件（`python bot.py`），职责只有两件事：加载环境变量、把四大功能模块挂到机器人上。它本身不含任何业务逻辑。
 
 ## 文件结构
 
 ```
-bot.py（约 110 行）
-├── load_dotenv()            # 加载 .env
-├── KeepAliveHandler          # HTTP 处理器：返回 "Bot is running." 页面
-├── start_keepalive_server()  # 后台线程跑 ThreadingHTTPServer
+bot.py
+├── load_dotenv()            # 加载 .env（必须在导入业务模块之前）
 ├── class SukakaBot(discord.Client)
 │   ├── __init__()           # Intents + 各模块的状态容器
 │   ├── setup_hook()          # 注册斜杠命令
@@ -20,7 +18,6 @@ bot.py（约 110 行）
 
 ```python
 main()
- ├── start_keepalive_server()        # 守护线程，HTTP 0.0.0.0:7861，供存活探针访问
  └── bot = SukakaBot(); bot.run(token)
       ├── setup_hook()（登录前）
       │    └── register_commands(bot)     # channel_admin 的 4 个斜杠命令
@@ -57,12 +54,6 @@ intents.message_content = True   # 读取消息内容（游戏关键词识别必
 ```
 
 `members` 和 `message_content` 属于特权 Intent，除了代码里声明，还必须在 [Discord 开发者后台](https://discord.com/developers/applications) → Bot → Privileged Gateway Intents 中开启，否则启动报错或收不到消息。
-
-## Keepalive 服务器
-
-- `ThreadingHTTPServer` 监听 `0.0.0.0:7861`，跑在名为 `keepalive-http` 的守护线程里。
-- 任意 GET 返回一个写着 "Bot is running." 的 HTML 页面，`log_message` 被覆写为静默（不打访问日志）。
-- 用途：部署平台（如 Hugging Face Space）的健康检查。若不需要可直接去掉 `start_keepalive_server()` 调用。
 
 ## 环境变量
 
