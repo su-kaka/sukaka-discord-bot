@@ -63,9 +63,10 @@ start_roulette(bot)
   - `consume_effect(user_id, key) -> bool`：读出即消费（一次性卡）；
   - `has_effect(user_id, key) -> bool`：只查不消费；
   - `is_offline(user_id) -> bool` / `clear_offline`：下线状态。
-- 唯一道具（蛇符咒、会员卡）用单行表 `snake_charm_holder` / `membership_card_holder` 存持有者。
+- 唯一道具（蛇符咒、会员卡、流星雨）用单行表 `snake_charm_holder` / `membership_card_holder` / `meteor_shower_holder` 存持有者。抽到流星雨时立即清空该用户掉落冷却（`clear_drop_cooldown`），下一条发言即可掉落。
 - 身体交换（你的名字卡）存 `body_swaps` 表，`restore_body_swaps` 后台任务在 5 分钟后换回。
 - **循环依赖规避惯例**：`packet_base.py`、`quota_drop.py` 等在函数体内延迟 `from roulette.gacha import ...`，因为 gacha 又 import 了 packet_base。新增跨模块引用时沿用此惯例。
+- 立即结算型卡牌（劫富济贫/自爆/错误/通货膨胀/存为王/变卖家产）不写 `gacha_effects`，抽到即触发。变卖家产清空该用户 `gacha_effects` 及蛇符咒/会员卡持有记录，按 `GACHA_SELLOUT_PRICE`（100 点/张）发放额度。
 
 ## 通用红包视图（packet_base.py）
 
@@ -79,14 +80,14 @@ start_roulette(bot)
 ## 发言掉落（quota_drop.py）
 
 - 每条非命令发言都可能触发：30% 概率掉 0 点，否则掉 1–50 点；另有 10% 概率变成「扣减 1–50 点」事件。
-- 单用户冷却 30–180 秒随机，用 SQLite `INSERT ... ON CONFLICT ... WHERE` 原子写入（`quota_drops.db`）。
+- 单用户冷却 30–180 秒随机，用 SQLite `INSERT ... ON CONFLICT ... WHERE` 原子写入（`quota_drops.db`）。持有流星雨道具时冷却除以 `QUOTA_DROP_COOLDOWN_DIVISOR`（减半）。
 - 通知**批量合并发送**：模块级缓冲区 + 每 0.5 秒刷新一次，按 1800 字符拆分（Discord 2000 上限留余量），发完 10 秒自动删除。
 
 ## 数据库与常量
 
 | DB | 表 | 说明 |
 | --- | --- | --- |
-| `gacha.db` | gacha_effects / snake_charm_holder / membership_card_holder / body_swaps / offline_users | 卡牌效果与特殊状态 |
+| `gacha.db` | gacha_effects / snake_charm_holder / membership_card_holder / meteor_shower_holder / body_swaps / offline_users | 卡牌效果与特殊状态 |
 | `bank.db` | bank_accounts / bank_hatred / bank_heist_cooldowns 等 | 银行存款与抢劫 |
 | `lottery.db` | lottery_pool | 彩票奖池（单行） |
 | `quota_drops.db` | drop_cooldowns | 掉落冷却 |
