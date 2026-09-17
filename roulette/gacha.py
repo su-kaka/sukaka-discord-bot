@@ -34,6 +34,7 @@ from roulette.constants import (
     GACHA_SELFDESTRUCT_MAX_PERCENT,
     GACHA_SELFDESTRUCT_MIN_PERCENT,
     GACHA_SELLOUT_PRICE,
+    GACHA_WISHING_TIMEOUT_SECONDS,
     MARRY_FEE_PERCENT,
     MARRY_MIN_FEE,
     OFFLINE_MIN_QUOTA,
@@ -70,8 +71,16 @@ CARD_POOL: dict[str, tuple[str, str, int]] = {
     "depositking": ("存为王", "排行榜前十名用户自动存款一次（额度的 50% 存入银行）", 5),
     "sellout": ("变卖家产", f"立即卖光身上所有道具卡牌（含蛇符咒/会员卡），每张 {GACHA_SELLOUT_PRICE} 点额度", 5),
     "offline": ("下线", f"【特殊道具】额度超过 {OFFLINE_MIN_QUOTA} 才能使用：额度重置为 {OFFLINE_RESET_QUOTA}，银行存款清空，无法被任何操作选择、无法抢红包、无法发言掉落额度，下次任意发言解除下线状态", 5),
+    "wishingpool": ("许愿池", f"从列表中任选一张道具卡（含即时生效卡），{GACHA_WISHING_TIMEOUT_SECONDS} 秒内未选视为放弃", 5),
     "blank": ("空白", "无效果", 40),  # 实际概率由 GACHA_BLANK_CHANCE 控制
 }
+
+# 许愿池可选范围：空白与许愿池本身不可选
+WISHING_EXCLUDED_CARDS = {"blank", "wishingpool"}
+# 抽中即结算的卡牌（选择后立即触发，不进背包）
+INSTANT_SETTLE_CARDS = {"robinhood", "selfdestruct", "error", "inflation", "depositking", "sellout"}
+# 唯一道具卡牌（选择后立即替换持有者，不进背包）
+UNIQUE_CARDS = {"snake", "membership", "meteor"}
 
 
 def _init_db() -> None:
@@ -469,6 +478,17 @@ async def handle_gacha(
         await _settle_error(message, client)
         return
 
+    # 许愿池：立即弹出选择列表，60 秒内任选一张道具卡
+    if card_key == "wishingpool":
+        view = WishPoolView(message, client)
+        view.message = await message.channel.send(
+            f"🎴 {message.author.mention} 消耗 {cost} 点抽卡……\n"
+            f"🌠 **{name}**！{desc}\n"
+            f"⏳ 请在 {GACHA_WISHING_TIMEOUT_SECONDS} 秒内从下方列表选择一张道具卡，超时视为放弃。",
+            view=view,
+        )
+        return
+
     # 通货膨胀：立即结算，不存效果
     if card_key == "inflation":
         await _settle_inflation(message)
@@ -493,10 +513,10 @@ async def handle_gacha(
 
 
 async def _handle_multidraw(message: discord.Message, client: httpx.AsyncClient, cost: int) -> None:
-    """十连抽：一次抽十张卡，逐张结算（自爆卡不进十连池子）。"""
+    """十连抽：一次抽十张卡，逐张结算（自爆/许愿池卡不进十连池子）。"""
     lines = [f"🎴 {message.author.mention} 发动 **十连抽**！消耗 {cost} 点抽十次："]
     for i in range(10):
-        card_key = _draw_card(exclude={"selfdestruct"})
+        card_key = _draw_card(exclude={"selfdestruct", "wishingpool"})
         name, desc, _ = CARD_POOL[card_key]
 
         if card_key == "blank":
@@ -1137,6 +1157,102 @@ async def handle_offline(
         f"📴 已进入下线状态：无法被任何交换选择、无法抢红包、无法发言掉落额度。\n"
         f"💬 下次任意发言将解除下线状态。"
     )
+
+
+class WishPoolView(discord.ui.View):
+    """许愿池视图：从卡池列表中任选一张道具卡。
+
+    即时生效卡（含唯一道具）选择后立即结算；持续型卡牌放入背包。
+    60 秒内未选择视为放弃。
+    """
+
+    def __init__(self, message: discord.Message, client: httpx.AsyncClient) -> None:
+        super().__init__(timeout=GACHA_WISHING_TIMEOUT_SECONDS)
+        self.message_obj = message
+        self.client = client
+        self.user_id = message.author.id
+        self.message: Optional[discord.Message] = None
+        self.selected = False
+
+        options = []
+        for key, (card_name, card_desc, _) in CARD_POOL.items():
+            if key in WISHING_EXCLUDED_CARDS:
+                continue
+            suffix = "（立即生效）" if key in INSTANT_SETTLE_CARDS or key in UNIQUE_CARDS else ""
+            options.append(
+                discord.SelectOption(label=card_name, value=key, description=(card_desc + suffix)[:100])
+            )
+        self.select_menu.options = options
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("🌠 这不是你的许愿池！", ephemeral=True)
+            return False
+        return True
+
+    @discord.ui.select(placeholder="🌠 选择一张你想要的道具卡……")
+    async def select_menu(self, interaction: discord.Interaction, select: discord.ui.Select) -> None:
+        card_key = select.values[0]
+        name, desc, _ = CARD_POOL[card_key]
+        self.selected = True
+        self.select_menu.disabled = True
+
+        # 即时生效卡：结算函数自己发送结果消息
+        if card_key in INSTANT_SETTLE_CARDS:
+            await interaction.response.edit_message(
+                content=f"🌠 <@{self.user_id}> 从许愿池选中了 **{name}**，立即结算……",
+                view=self,
+            )
+            if card_key == "robinhood":
+                await _settle_robinhood(self.message_obj, self.client)
+            elif card_key == "selfdestruct":
+                await _settle_selfdestruct(self.message_obj, self.client)
+            elif card_key == "error":
+                await _settle_error(self.message_obj, self.client)
+            elif card_key == "inflation":
+                await _settle_inflation(self.message_obj)
+            elif card_key == "depositking":
+                await _settle_depositking(self.message_obj, self.client)
+            elif card_key == "sellout":
+                await _settle_sellout(self.message_obj, self.client)
+        # 唯一道具：立即替换持有者
+        elif card_key in UNIQUE_CARDS:
+            setter, getter = {
+                "snake": (set_snake_charm_holder, get_snake_charm_holder),
+                "membership": (set_membership_card_holder, get_membership_card_holder),
+                "meteor": (set_meteor_shower_holder, get_meteor_shower_holder),
+            }[card_key]
+            old_holder = getter()
+            setter(self.user_id)
+            transfer_note = f"\n⏭️ 已从 <@{old_holder}> 手中转移！" if old_holder and old_holder != self.user_id else ""
+            if card_key == "meteor":
+                from roulette.quota_drop import clear_drop_cooldown
+
+                clear_drop_cooldown(self.user_id)
+                transfer_note += "\n🌠 掉落冷却已重置，下一条发言即可掉落！"
+            await interaction.response.edit_message(
+                content=f"🌠 <@{self.user_id}> 从许愿池选中了 **{name}**！{desc}{transfer_note}",
+                view=self,
+            )
+        else:
+            # 持续型卡牌：放入背包
+            _add_effect(self.user_id, card_key, 1)
+            await interaction.response.edit_message(
+                content=f"🌠 <@{self.user_id}> 从许愿池选中了 **{name}**！{desc}\n🎒 已放入背包，可用 `我的卡牌` 查看。",
+                view=self,
+            )
+        self.stop()
+
+    async def on_timeout(self) -> None:
+        if self.selected:
+            return
+        for item in self.children:
+            item.disabled = True  # type: ignore[attr-defined]
+        try:
+            if self.message:
+                await self.message.edit(content="🌠 ⏳ 60 秒内未选择，许愿池机会已放弃。", view=self)
+        except discord.HTTPException:
+            pass
 
 
 _init_db()
