@@ -69,9 +69,10 @@ CARD_POOL: dict[str, tuple[str, str, int]] = {
     "yourname": ("你的名字", "【超稀有道具】使用 `你的名字@某人` 和某人交换身体：双方交换所有额度/卡牌/银行存款，5 分钟后换回，期间双方不能再被你的名字影响", 1),
     "inflation": ("通货膨胀", "若银行存在存款 > 3000 点的用户，所有人存款数值减半", 5),
     "depositking": ("存为王", "排行榜前十名用户自动存款一次（额度的 50% 存入银行）", 5),
-    "sellout": ("变卖家产", f"立即卖光身上所有道具卡牌（含蛇符咒/会员卡），每张 {GACHA_SELLOUT_PRICE} 点额度", 5),
+    "sellout": ("变卖家产", f"随机卖掉若干种道具的随机数量（含蛇符咒/会员卡/流星雨/收藏家），每张 {GACHA_SELLOUT_PRICE} 点额度", 5),
     "offline": ("下线", f"【特殊道具】额度超过 {OFFLINE_MIN_QUOTA} 才能使用：额度重置为 {OFFLINE_RESET_QUOTA}，银行存款清空，无法被任何操作选择、无法抢红包、无法发言掉落额度，下次任意发言解除下线状态", 5),
     "wishingpool": ("许愿池", f"从列表中任选一张道具卡（含即时生效卡），{GACHA_WISHING_TIMEOUT_SECONDS} 秒内未选视为放弃", 5),
+    "collector": ("收藏家", "抽卡得到的背包道具可叠加次数：重复抽到相同道具时次数 +1 而不是重置为 1（唯一道具，直到下一个人抽到）", 5),
     "blank": ("空白", "无效果", 40),  # 实际概率由 GACHA_BLANK_CHANCE 控制
 }
 
@@ -80,7 +81,7 @@ WISHING_EXCLUDED_CARDS = {"blank", "wishingpool"}
 # 抽中即结算的卡牌（选择后立即触发，不进背包）
 INSTANT_SETTLE_CARDS = {"robinhood", "selfdestruct", "error", "inflation", "depositking", "sellout"}
 # 唯一道具卡牌（选择后立即替换持有者，不进背包）
-UNIQUE_CARDS = {"snake", "membership", "meteor"}
+UNIQUE_CARDS = {"snake", "membership", "meteor", "collector"}
 
 
 def _init_db() -> None:
@@ -118,6 +119,15 @@ def _init_db() -> None:
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS meteor_shower_holder (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                discord_id INTEGER NOT NULL,
+                created_at REAL NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS collector_card_holder (
                 id INTEGER PRIMARY KEY CHECK (id = 1),
                 discord_id INTEGER NOT NULL,
                 created_at REAL NOT NULL
@@ -261,6 +271,54 @@ def has_meteor_shower(discord_id: int) -> bool:
     return get_meteor_shower_holder() == discord_id
 
 
+def set_collector_card_holder(discord_id: int) -> None:
+    """设置收藏家唯一持有者（覆盖旧持有者）。"""
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute(
+            """
+            INSERT INTO collector_card_holder (id, discord_id, created_at)
+            VALUES (1, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                discord_id = excluded.discord_id,
+                created_at = excluded.created_at
+            """,
+            (discord_id, time.time()),
+        )
+
+
+def get_collector_card_holder() -> Optional[int]:
+    """查询当前收藏家持有者，无持有者返回 None。"""
+    with sqlite3.connect(DB_PATH) as conn:
+        row = conn.execute(
+            "SELECT discord_id FROM collector_card_holder WHERE id = 1"
+        ).fetchone()
+    return row[0] if row else None
+
+
+def has_collector(discord_id: int) -> bool:
+    """是否持有收藏家（唯一道具）。"""
+    return get_collector_card_holder() == discord_id
+
+
+def _add_effect_on_draw(discord_id: int, card_key: str) -> int:
+    """抽卡获得背包道具：持有收藏家时叠加次数（+1），否则重置为 1。返回当前次数。"""
+    if has_collector(discord_id):
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.execute(
+                """
+                INSERT INTO gacha_effects (discord_id, card_key, remaining, created_at)
+                VALUES (?, ?, 1, ?)
+                ON CONFLICT(discord_id, card_key) DO UPDATE SET
+                    remaining = remaining + 1,
+                    created_at = excluded.created_at
+                """,
+                (discord_id, card_key, time.time()),
+            )
+        return get_effect_remaining(discord_id, card_key)
+    _add_effect(discord_id, card_key, 1)
+    return 1
+
+
 def _draw_card(exclude: Optional[set[str]] = None) -> str:
     """抽一张卡：GACHA_BLANK_CHANCE 概率空白，其余按权重随机。"""
     if random.random() < GACHA_BLANK_CHANCE:
@@ -338,6 +396,8 @@ def steal_random_card(robber_id: int, target_id: int) -> Optional[str]:
         candidates.append("membership")
     if has_meteor_shower(target_id):
         candidates.append("meteor")
+    if has_collector(target_id):
+        candidates.append("collector")
     if not candidates:
         return None
     card_key = random.choice(candidates)
@@ -347,6 +407,8 @@ def steal_random_card(robber_id: int, target_id: int) -> Optional[str]:
         set_membership_card_holder(robber_id)
     elif card_key == "meteor":
         set_meteor_shower_holder(robber_id)
+    elif card_key == "collector":
+        set_collector_card_holder(robber_id)
     else:
         consume_effect(target_id, card_key)
         _add_effect(robber_id, card_key, 1)
@@ -473,6 +535,19 @@ async def handle_gacha(
         )
         return
 
+    # 收藏家：唯一道具，立即替换持有者
+    if card_key == "collector":
+        old_holder = get_collector_card_holder()
+        set_collector_card_holder(message.author.id)
+        transfer_note = ""
+        if old_holder and old_holder != message.author.id:
+            transfer_note = f"\n📦 收藏家已从 <@{old_holder}> 手中转移！"
+        await message.channel.send(
+            f"🎴 {message.author.mention} 消耗 {cost} 点抽卡……\n"
+            f"📦 **{name}**！{desc}。{transfer_note}"
+        )
+        return
+
     # 错误：立即结算，额度重置为随机值
     if card_key == "error":
         await _settle_error(message, client)
@@ -504,11 +579,12 @@ async def handle_gacha(
         await _settle_sellout(message, client)
         return
 
-    # 所有卡牌均只生效 1 次
-    _add_effect(message.author.id, card_key, 1)
+    # 背包道具：持有收藏家时叠加次数，否则重置为 1
+    remaining = _add_effect_on_draw(message.author.id, card_key)
+    stack_note = f"（叠加至 ×{remaining}）" if remaining > 1 else ""
     await message.channel.send(
         f"🎴 {message.author.mention} 消耗 {cost} 点抽卡……\n"
-        f"✨ **{name}**！{desc}。"
+        f"✨ **{name}**！{desc}。{stack_note}"
     )
 
 
@@ -552,6 +628,13 @@ async def _handle_multidraw(message: discord.Message, client: httpx.AsyncClient,
             lines.append(f"{i+1}. ☄️ **{name}**！{desc}{transfer_note}（掉落冷却已重置）")
             continue
 
+        if card_key == "collector":
+            old_holder = get_collector_card_holder()
+            set_collector_card_holder(message.author.id)
+            transfer_note = f"（从 <@{old_holder}> 手中转移）" if old_holder and old_holder != message.author.id else ""
+            lines.append(f"{i+1}. 📦 **{name}**！{desc}{transfer_note}")
+            continue
+
         if card_key == "error":
             lines.append(f"{i+1}. 💥 **{name}**！立即结算……")
             await _settle_error(message, client)
@@ -572,8 +655,10 @@ async def _handle_multidraw(message: discord.Message, client: httpx.AsyncClient,
             await _settle_sellout(message, client)
             continue
 
-        _add_effect(message.author.id, card_key, 1)
-        lines.append(f"{i+1}. ✨ **{name}**！{desc}")
+        _add_effect_on_draw(message.author.id, card_key)
+        remaining = get_effect_remaining(message.author.id, card_key)
+        stack_note = f"（叠加至 ×{remaining}）" if remaining > 1 else ""
+        lines.append(f"{i+1}. ✨ **{name}**！{desc}{stack_note}")
 
     await message.channel.send("\n".join(lines))
 
@@ -741,57 +826,53 @@ async def _settle_inflation(message: discord.Message) -> None:
 
 
 async def _settle_sellout(message: discord.Message, client: httpx.AsyncClient) -> None:
-    """变卖家产：卖光身上所有道具卡牌（含蛇符咒/会员卡/流星雨），每张 100 点额度。"""
-    cards = get_user_cards(message.author.id)
-    sold_lines = [f"• **{CARD_POOL.get(k, (k, '', 0))[0]}** ×{r}" for k, r in cards]
-    sold_count = sum(remaining for _, remaining in cards)
-
-    # 唯一道具（蛇符咒/会员卡/流星雨）也算一张
+    """变卖家产：从背包随机选出若干种道具，每种随机卖掉 1~持有数量 个，每张 100 点额度。"""
+    # 候选道具：背包卡牌 (key, 持有数量) + 唯一道具（每件 1 个）
+    items: list[tuple[str, int, bool]] = [
+        (card_key, remaining, False) for card_key, remaining in get_user_cards(message.author.id)
+    ]
     if has_snake_charm(message.author.id):
-        sold_lines.append("• **蛇符咒** ×1")
-        sold_count += 1
+        items.append(("snake", 1, True))
     if has_membership_card(message.author.id):
-        sold_lines.append("• **会员卡** ×1")
-        sold_count += 1
+        items.append(("membership", 1, True))
     if has_meteor_shower(message.author.id):
-        sold_lines.append("• **流星雨** ×1")
-        sold_count += 1
+        items.append(("meteor", 1, True))
+    if has_collector(message.author.id):
+        items.append(("collector", 1, True))
 
-    if sold_count == 0:
+    if not items:
         await message.channel.send("🏷️ 你身上没有任何道具卡牌，变卖家产无效果。")
         return
 
-    # 清空背包：卡牌效果 + 唯一道具持有记录
-    with sqlite3.connect(DB_PATH) as conn:
-        conn.execute(
-            "DELETE FROM gacha_effects WHERE discord_id = ?",
-            (message.author.id,),
-        )
-        conn.execute(
-            "DELETE FROM snake_charm_holder WHERE discord_id = ?",
-            (message.author.id,),
-        )
-        conn.execute(
-            "DELETE FROM membership_card_holder WHERE discord_id = ?",
-            (message.author.id,),
-        )
-        conn.execute(
-            "DELETE FROM meteor_shower_holder WHERE discord_id = ?",
-            (message.author.id,),
-        )
+    # 随机选出 1~全部 种道具，每种卖随机数量
+    selected = random.sample(items, random.randint(1, len(items)))
+    sold_lines = []
+    total = 0
+    for card_key, owned, is_unique in selected:
+        sold_count = 1 if is_unique else random.randint(1, owned)
+        # 结算：唯一道具清除持有记录，背包道具扣减数量
+        if is_unique:
+            with sqlite3.connect(DB_PATH) as conn:
+                conn.execute(
+                    f"DELETE FROM {card_key}_holder WHERE discord_id = ?",
+                    (message.author.id,),
+                )
+        else:
+            for _ in range(sold_count):
+                consume_effect(message.author.id, card_key)
+        total += sold_count * GACHA_SELLOUT_PRICE
+        name, _, _ = CARD_POOL.get(card_key, (card_key, "", 0))
+        sold_lines.append(f"• **{name}** ×{sold_count}（持有 {owned} 个）")
 
-    total = sold_count * GACHA_SELLOUT_PRICE
     granted = await adjust_quota(client, "grant", message.author.name, total)
     if granted is None:
         await message.channel.send("🏷️ 发放额度失败，请联系管理员（卡牌已变卖）。")
         return
 
-    lines = [
-        f"🏷️ {message.author.mention} 抽中 **变卖家产**！",
-        f"卖光 {sold_count} 张道具卡牌，获得 **{total} 点**额度：",
-        *sold_lines,
-    ]
-    await message.channel.send("\n".join(lines))
+    await message.channel.send(
+        f"🏷️ {message.author.mention} 抽中 **变卖家产**！\n"
+        f"卖掉 {len(selected)} 种道具，获得 **{total} 点**额度：\n" + "\n".join(sold_lines)
+    )
 
 
 async def _settle_selfdestruct(message: discord.Message, client: httpx.AsyncClient) -> None:
@@ -1221,6 +1302,7 @@ class WishPoolView(discord.ui.View):
                 "snake": (set_snake_charm_holder, get_snake_charm_holder),
                 "membership": (set_membership_card_holder, get_membership_card_holder),
                 "meteor": (set_meteor_shower_holder, get_meteor_shower_holder),
+                "collector": (set_collector_card_holder, get_collector_card_holder),
             }[card_key]
             old_holder = getter()
             setter(self.user_id)
@@ -1235,10 +1317,11 @@ class WishPoolView(discord.ui.View):
                 view=self,
             )
         else:
-            # 持续型卡牌：放入背包
-            _add_effect(self.user_id, card_key, 1)
+            # 持续型卡牌：放入背包（持有收藏家时叠加）
+            remaining = _add_effect_on_draw(self.user_id, card_key)
+            stack_note = f"（叠加至 ×{remaining}）" if remaining > 1 else ""
             await interaction.response.edit_message(
-                content=f"🌠 <@{self.user_id}> 从许愿池选中了 **{name}**！{desc}\n🎒 已放入背包，可用 `我的卡牌` 查看。",
+                content=f"🌠 <@{self.user_id}> 从许愿池选中了 **{name}**！{desc}{stack_note}\n🎒 已放入背包，可用 `我的卡牌` 查看。",
                 view=self,
             )
         self.stop()

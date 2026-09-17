@@ -63,10 +63,10 @@ start_roulette(bot)
   - `consume_effect(user_id, key) -> bool`：读出即消费（一次性卡）；
   - `has_effect(user_id, key) -> bool`：只查不消费；
   - `is_offline(user_id) -> bool` / `clear_offline`：下线状态。
-- 唯一道具（蛇符咒、会员卡、流星雨）用单行表 `snake_charm_holder` / `membership_card_holder` / `meteor_shower_holder` 存持有者。抽到流星雨时立即清空该用户掉落冷却（`clear_drop_cooldown`），下一条发言即可掉落。
+- 唯一道具（蛇符咒、会员卡、流星雨、收藏家）用单行表 `snake_charm_holder` / `membership_card_holder` / `meteor_shower_holder` / `collector_card_holder` 存持有者。抽到流星雨时立即清空该用户掉落冷却（`clear_drop_cooldown`），下一条发言即可掉落。收藏家持有期间，抽卡获得的背包道具次数**叠加**（重复抽到 +1 而非重置为 1），核心函数是 `_add_effect_on_draw`。
 - 身体交换（你的名字卡）存 `body_swaps` 表，`restore_body_swaps` 后台任务在 5 分钟后换回。
 - **循环依赖规避惯例**：`packet_base.py`、`quota_drop.py` 等在函数体内延迟 `from roulette.gacha import ...`，因为 gacha 又 import 了 packet_base。新增跨模块引用时沿用此惯例。
-- 立即结算型卡牌（劫富济贫/自爆/错误/通货膨胀/存为王/变卖家产）不写 `gacha_effects`，抽到即触发。变卖家产清空该用户 `gacha_effects` 及蛇符咒/会员卡持有记录，按 `GACHA_SELLOUT_PRICE`（100 点/张）发放额度。
+- 立即结算型卡牌（劫富济贫/自爆/错误/通货膨胀/存为王/变卖家产）不写 `gacha_effects`，抽到即触发。变卖家产**从背包随机选出若干种道具，每种随机卖 1~持有数量个**（唯一道具固定卖 1 个并清除持有记录），按 `GACHA_SELLOUT_PRICE`（100 点/张）发放额度。
 
 ## 通用红包视图（packet_base.py）
 
@@ -87,7 +87,7 @@ start_roulette(bot)
 
 | DB | 表 | 说明 |
 | --- | --- | --- |
-| `gacha.db` | gacha_effects / snake_charm_holder / membership_card_holder / meteor_shower_holder / body_swaps / offline_users | 卡牌效果与特殊状态 |
+| `gacha.db` | gacha_effects / snake_charm_holder / membership_card_holder / meteor_shower_holder / collector_card_holder / body_swaps / offline_users | 卡牌效果与特殊状态 |
 | `bank.db` | bank_accounts / bank_hatred / bank_heist_cooldowns 等 | 银行存款与抢劫 |
 | `lottery.db` | lottery_pool | 彩票奖池（单行） |
 | `quota_drops.db` | drop_cooldowns | 掉落冷却 |
