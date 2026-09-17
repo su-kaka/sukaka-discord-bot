@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import os
 import re
 import sqlite3
@@ -10,6 +11,8 @@ from typing import TYPE_CHECKING, Optional
 
 import discord
 from discord import app_commands
+
+logger = logging.getLogger("sukaka.channel_admin")
 
 if TYPE_CHECKING:
     from bot import SukakaBot
@@ -32,6 +35,7 @@ MESSAGE_LINK_PATTERN = re.compile(
 
 def parse_whitelist(raw: str) -> set[int]:
     if not raw:
+        logger.warning("MUTE_WHITELIST 为空或未设置：所有用户都将无法使用管理命令")
         return set()
     result: set[int] = set()
     for chunk in raw.split(","):
@@ -40,6 +44,9 @@ def parse_whitelist(raw: str) -> set[int]:
             continue
         if chunk.isdigit():
             result.add(int(chunk))
+        else:
+            logger.warning("MUTE_WHITELIST 中存在无法解析的条目（已忽略）: %r", chunk)
+    logger.info("MUTE_WHITELIST 已解析，共 %d 个用户 ID: %s", len(result), sorted(result))
     return result
 
 
@@ -342,8 +349,19 @@ def is_whitelisted(user_id: int) -> bool:
 
 def deny_reason(interaction: discord.Interaction) -> Optional[str]:
     if not is_allowed_channel(interaction):
+        logger.info(
+            "拒绝访问：频道不在允许范围内 user=%s channel=%s allowed=%s",
+            interaction.user.id,
+            interaction.channel_id,
+            ALLOWED_CHANNEL_ID,
+        )
         return f"此机器人只能在 <#{ALLOWED_CHANNEL_ID}> 中使用。"
     if not is_whitelisted(interaction.user.id):
+        logger.info(
+            "拒绝访问：用户不在 MUTE_WHITELIST 中 user=%s whitelist=%s",
+            interaction.user.id,
+            sorted(OPERATION_WHITELIST),
+        )
         return "你没有使用此机器人的权限。"
     return None
 

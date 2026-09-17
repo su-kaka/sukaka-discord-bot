@@ -10,16 +10,18 @@ import discord
 from discord import app_commands
 from dotenv import load_dotenv
 
-from carousel import start_carousel
-from channel_admin import (
+# 必须在导入业务模块之前加载 .env：
+# channel_admin 等模块在 import 时就会读取 os.getenv，导入后加载就晚了。
+load_dotenv()
+
+from carousel import start_carousel  # noqa: E402
+from channel_admin import (  # noqa: E402
     VoteState,
     register_commands,
     start_channel_mute_restores,
 )
-from mama import start_mama
-from roulette import start_roulette
-
-load_dotenv()
+from mama import start_mama  # noqa: E402
+from roulette import start_roulette  # noqa: E402
 
 KEEPALIVE_HOST = "0.0.0.0"
 KEEPALIVE_PORT = 7861
