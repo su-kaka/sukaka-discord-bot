@@ -151,8 +151,8 @@ async def handle_drop_message(client: httpx.AsyncClient, message: discord.Messag
     if not _try_set_cooldown(discord_id, cooldown_until):
         return
 
-    # 一定概率触发扣减事件
-    if random.random() < QUOTA_DROP_DEDUCT_CHANCE:
+    # 一定概率触发扣减事件（流星雨持有者免疫：改为正常掉落）
+    if random.random() < QUOTA_DROP_DEDUCT_CHANCE and not has_meteor_shower(message.author.id):
         deduct_amount = random.randint(QUOTA_DROP_DEDUCT_MIN, QUOTA_DROP_DEDUCT_MAX)
         current_quota = await adjust_quota(client, "deduct", username, deduct_amount)
         if current_quota is None:

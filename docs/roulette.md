@@ -80,7 +80,7 @@ start_roulette(bot)
 ## 发言掉落（quota_drop.py）
 
 - 每条非命令发言都可能触发：30% 概率掉 0 点，否则掉 1–50 点；另有 10% 概率变成「扣减 1–50 点」事件。
-- 单用户冷却 30–180 秒随机，用 SQLite `INSERT ... ON CONFLICT ... WHERE` 原子写入（`quota_drops.db`）。持有流星雨道具时冷却除以 `QUOTA_DROP_COOLDOWN_DIVISOR`（减半）。
+- 单用户冷却 30–180 秒随机，用 SQLite `INSERT ... ON CONFLICT ... WHERE` 原子写入（`quota_drops.db`）。持有流星雨道具时冷却除以 `QUOTA_DROP_COOLDOWN_DIVISOR`（减半），且**免疫 10% 扣减事件**（改为正常掉落判定）。
 - 通知**批量合并发送**：模块级缓冲区 + 每 0.5 秒刷新一次，按 1800 字符拆分（Discord 2000 上限留余量），发完 10 秒自动删除。
 
 ## 数据库与常量
