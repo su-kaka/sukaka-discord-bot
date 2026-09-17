@@ -72,7 +72,7 @@ CARD_POOL: dict[str, tuple[str, str, int]] = {
     "sellout": ("变卖家产", f"随机卖掉若干种道具的随机数量（含蛇符咒/会员卡/流星雨/收藏家），每张 {GACHA_SELLOUT_PRICE} 点额度", 5),
     "offline": ("下线", f"【特殊道具】额度超过 {OFFLINE_MIN_QUOTA} 才能使用：额度重置为 {OFFLINE_RESET_QUOTA}，银行存款清空，无法被任何操作选择、无法抢红包、无法发言掉落额度，下次任意发言解除下线状态", 5),
     "wishingpool": ("许愿池", f"从列表中任选一张道具卡（含即时生效卡），{GACHA_WISHING_TIMEOUT_SECONDS} 秒内未选视为放弃", 5),
-    "collector": ("收藏家", "抽卡得到的背包道具可叠加次数：重复抽到相同道具时次数 +1 而不是重置为 1（唯一道具，直到下一个人抽到）", 5),
+    "collector": ("收藏家", "抽卡得到的背包道具可叠加次数：重复抽到相同道具时次数 +1（无收藏家时重复抽到不叠加，但保留已有数量不会重置）（唯一道具，直到下一个人抽到）", 5),
     "blank": ("空白", "无效果", 40),  # 实际概率由 GACHA_BLANK_CHANCE 控制
 }
 
@@ -300,23 +300,34 @@ def has_collector(discord_id: int) -> bool:
     return get_collector_card_holder() == discord_id
 
 
-def _add_effect_on_draw(discord_id: int, card_key: str) -> int:
-    """抽卡获得背包道具：持有收藏家时叠加次数（+1），否则重置为 1。返回当前次数。"""
-    if has_collector(discord_id):
-        with sqlite3.connect(DB_PATH) as conn:
-            conn.execute(
-                """
-                INSERT INTO gacha_effects (discord_id, card_key, remaining, created_at)
-                VALUES (?, ?, 1, ?)
-                ON CONFLICT(discord_id, card_key) DO UPDATE SET
-                    remaining = remaining + 1,
-                    created_at = excluded.created_at
-                """,
-                (discord_id, card_key, time.time()),
-            )
-        return get_effect_remaining(discord_id, card_key)
+def _stack_effect(discord_id: int, card_key: str, amount: int = 1) -> int:
+    """叠加道具数量（+amount），返回叠加后的当前次数。"""
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute(
+            """
+            INSERT INTO gacha_effects (discord_id, card_key, remaining, created_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(discord_id, card_key) DO UPDATE SET
+                remaining = remaining + excluded.remaining,
+                created_at = excluded.created_at
+            """,
+            (discord_id, card_key, amount, time.time()),
+        )
+    return get_effect_remaining(discord_id, card_key)
+
+
+def _add_effect_on_draw(discord_id: int, card_key: str) -> tuple[int, bool]:
+    """抽卡获得背包道具：持有收藏家时叠加次数（+1）；未持有时保留已有数量不重置（首次获得仍为 1）。
+
+    返回 (当前次数, 是否发生了叠加)。"""
+    current = get_effect_remaining(discord_id, card_key)
+    if current > 0:
+        if has_collector(discord_id):
+            return _stack_effect(discord_id, card_key, 1), True
+        # 未持有收藏家：不叠加也不重置，保留原数量
+        return current, False
     _add_effect(discord_id, card_key, 1)
-    return 1
+    return 1, False
 
 
 def _draw_card(exclude: Optional[set[str]] = None) -> str:
@@ -410,8 +421,9 @@ def steal_random_card(robber_id: int, target_id: int) -> Optional[str]:
     elif card_key == "collector":
         set_collector_card_holder(robber_id)
     else:
+        # 偷来的道具叠加到自己的背包（+1），不重置已有数量
         consume_effect(target_id, card_key)
-        _add_effect(robber_id, card_key, 1)
+        _stack_effect(robber_id, card_key, 1)
     name, _, _ = CARD_POOL.get(card_key, (card_key, "", 0))
     return name
 
@@ -579,9 +591,14 @@ async def handle_gacha(
         await _settle_sellout(message, client)
         return
 
-    # 背包道具：持有收藏家时叠加次数，否则重置为 1
-    remaining = _add_effect_on_draw(message.author.id, card_key)
-    stack_note = f"（叠加至 ×{remaining}）" if remaining > 1 else ""
+    # 背包道具：持有收藏家时叠加次数，否则保留已有数量不重置
+    remaining, stacked = _add_effect_on_draw(message.author.id, card_key)
+    if stacked:
+        stack_note = f"（收藏家生效，叠加至 ×{remaining}）"
+    elif remaining > 1:
+        stack_note = f"（已持有 ×{remaining}，未持有收藏家不叠加，数量保留）"
+    else:
+        stack_note = ""
     await message.channel.send(
         f"🎴 {message.author.mention} 消耗 {cost} 点抽卡……\n"
         f"✨ **{name}**！{desc}。{stack_note}"
@@ -655,9 +672,13 @@ async def _handle_multidraw(message: discord.Message, client: httpx.AsyncClient,
             await _settle_sellout(message, client)
             continue
 
-        _add_effect_on_draw(message.author.id, card_key)
-        remaining = get_effect_remaining(message.author.id, card_key)
-        stack_note = f"（叠加至 ×{remaining}）" if remaining > 1 else ""
+        remaining, stacked = _add_effect_on_draw(message.author.id, card_key)
+        if stacked:
+            stack_note = f"（收藏家生效，叠加至 ×{remaining}）"
+        elif remaining > 1:
+            stack_note = f"（已持有 ×{remaining}，未持有收藏家不叠加，数量保留）"
+        else:
+            stack_note = ""
         lines.append(f"{i+1}. ✨ **{name}**！{desc}{stack_note}")
 
     await message.channel.send("\n".join(lines))
@@ -1317,9 +1338,14 @@ class WishPoolView(discord.ui.View):
                 view=self,
             )
         else:
-            # 持续型卡牌：放入背包（持有收藏家时叠加）
-            remaining = _add_effect_on_draw(self.user_id, card_key)
-            stack_note = f"（叠加至 ×{remaining}）" if remaining > 1 else ""
+            # 持续型卡牌：放入背包（持有收藏家时叠加，否则保留已有数量）
+            remaining, stacked = _add_effect_on_draw(self.user_id, card_key)
+            if stacked:
+                stack_note = f"（收藏家生效，叠加至 ×{remaining}）"
+            elif remaining > 1:
+                stack_note = f"（已持有 ×{remaining}，未持有收藏家不叠加，数量保留）"
+            else:
+                stack_note = ""
             await interaction.response.edit_message(
                 content=f"🌠 <@{self.user_id}> 从许愿池选中了 **{name}**！{desc}{stack_note}\n🎒 已放入背包，可用 `我的卡牌` 查看。",
                 view=self,
