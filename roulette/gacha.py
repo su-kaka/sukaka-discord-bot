@@ -69,7 +69,7 @@ CARD_POOL: dict[str, tuple[str, str, int]] = {
     "yourname": ("你的名字", "【超稀有道具】使用 `你的名字@某人` 和某人交换身体：双方交换所有额度/卡牌/银行存款，5 分钟后换回，期间双方不能再被你的名字影响", 1),
     "inflation": ("通货膨胀", "若银行存在存款 > 3000 点的用户，所有人存款数值减半", 5),
     "depositking": ("存为王", "排行榜前十名用户自动存款一次（额度的 50% 存入银行）", 5),
-    "sellout": ("变卖家产", f"随机卖掉若干种道具的随机数量（含蛇符咒/会员卡/流星雨/收藏家），每张 {GACHA_SELLOUT_PRICE} 点额度", 5),
+    "sellout": ("变卖家产", f"随机卖掉若干种道具的全部数量（含蛇符咒/会员卡/流星雨/收藏家），每张 {GACHA_SELLOUT_PRICE} 点额度", 5),
     "offline": ("下线", f"【特殊道具】额度超过 {OFFLINE_MIN_QUOTA} 才能使用：额度重置为 {OFFLINE_RESET_QUOTA}，银行存款清空，无法被任何操作选择、无法抢红包、无法发言掉落额度，下次任意发言解除下线状态", 5),
     "wishingpool": ("许愿池", f"从列表中任选一张道具卡（含即时生效卡），{GACHA_WISHING_TIMEOUT_SECONDS} 秒内未选视为放弃", 5),
     "collector": ("收藏家", "抽卡得到的背包道具可叠加次数：重复抽到相同道具时次数 +1（无收藏家时重复抽到不叠加，但保留已有数量不会重置）（唯一道具，直到下一个人抽到）", 5),
@@ -847,7 +847,7 @@ async def _settle_inflation(message: discord.Message) -> None:
 
 
 async def _settle_sellout(message: discord.Message, client: httpx.AsyncClient) -> None:
-    """变卖家产：从背包随机选出若干种道具，每种随机卖掉 1~持有数量 个，每张 100 点额度。"""
+    """变卖家产：从背包随机选出若干种道具，每种卖掉全部持有数量，每张 100 点额度。"""
     # 候选道具：背包卡牌 (key, 持有数量) + 唯一道具（每件 1 个）
     items: list[tuple[str, int, bool]] = [
         (card_key, remaining, False) for card_key, remaining in get_user_cards(message.author.id)
@@ -865,12 +865,12 @@ async def _settle_sellout(message: discord.Message, client: httpx.AsyncClient) -
         await message.channel.send("🏷️ 你身上没有任何道具卡牌，变卖家产无效果。")
         return
 
-    # 随机选出 1~全部 种道具，每种卖随机数量
+    # 随机选出 1~全部 种道具，每种卖掉全部持有数量
     selected = random.sample(items, random.randint(1, len(items)))
     sold_lines = []
     total = 0
     for card_key, owned, is_unique in selected:
-        sold_count = 1 if is_unique else random.randint(1, owned)
+        sold_count = owned
         # 结算：唯一道具清除持有记录，背包道具扣减数量
         if is_unique:
             with sqlite3.connect(DB_PATH) as conn:
