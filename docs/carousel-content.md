@@ -3,7 +3,7 @@ GCLI 凭证报错：
 - 如果出现 `403 You do not have a valid license of this product.`，请开通 Pro，或寻找可用的家庭组。
 - 如果 GCLI 报错消息中包含 `Verify your account to continue.`，点击快验按钮，然后点击显示的链接完成验证即可。验证失败可以尝试这个方法：https://discord.com/channels/1134557553011998840/1543395896409071736
 GCLI额度获取：
-- 上传一个pro凭证（学生pro或者企业pro） → 获得 **500 pro额度 3000点flash额度**（可以额外吃glm5.3 dsv4p）
+- 上传一个pro凭证（学生pro或者企业pro） → 获得 **500 pro额度 3000点flash额度**（可以额外吃kimi-k2.6 dsv4p）
 - 上传一个free凭证 → 获得 **1000点flash额度**（可以额外吃glm5.3f dsv4f）
 找妈妈（家庭组互助）：
 - 想找人拉你进谷歌家庭组共享 Pro？在本频道发送「找妈妈」查看所有愿意分享位置的成员，在菜单里选一位直接私信联系
