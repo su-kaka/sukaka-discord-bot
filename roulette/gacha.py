@@ -174,6 +174,13 @@ def is_offline(discord_id: int) -> bool:
     return row is not None
 
 
+def get_offline_users() -> list[int]:
+    """查询所有处于下线状态的用户 discord_id 列表。"""
+    with sqlite3.connect(DB_PATH) as conn:
+        rows = conn.execute("SELECT discord_id FROM offline_users").fetchall()
+    return [row[0] for row in rows]
+
+
 def clear_offline(discord_id: int) -> bool:
     """解除用户下线状态，返回是否之前处于下线状态。"""
     with sqlite3.connect(DB_PATH) as conn:

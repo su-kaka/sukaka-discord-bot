@@ -210,6 +210,24 @@ GET /api/activity-quota/top
 X-Activity-Quota-Key: 你的活动额度专用密钥
 ```
 
+### 可选参数
+
+| 参数 | 位置 | 类型 | 说明 |
+| ---- | ---- | ---- | ---- |
+| `exclude` | Query | string | 需要排除的用户名，不出现在排行榜中。多个用户名用英文逗号分隔，如 `exclude=alice,bob`；用户名两侧空格会被自动去除，空项会被忽略。不传该参数时返回完整前十榜单。 |
+
+### 请求示例
+
+```bash
+# 查询完整前十榜单
+curl "https://你的域名/api/activity-quota/top" \
+  -H "X-Activity-Quota-Key: 你的活动额度专用密钥"
+
+# 排除指定用户后查询
+curl "https://你的域名/api/activity-quota/top?exclude=alice,bob" \
+  -H "X-Activity-Quota-Key: 你的活动额度专用密钥"
+```
+
 ### 成功响应
 
 ```json
@@ -340,12 +358,13 @@ def deduct_activity_quota(username: str, amount: int) -> str:
     return f"扣减失败：{data.get('detail', '未知错误')}"
 
 
-def get_top_activity_quota_users() -> str:
+def get_top_activity_quota_users(exclude: str = "") -> str:
     response = requests.get(
         f"{BASE_URL}/api/activity-quota/top",
         headers={
             "X-Activity-Quota-Key": ACTIVITY_QUOTA_KEY,
         },
+        params={"exclude": exclude} if exclude else None,
         timeout=15,
     )
     data = response.json()

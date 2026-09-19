@@ -2,25 +2,49 @@
 
 from __future__ import annotations
 
+from typing import Optional
+
 import discord
 import httpx
 
 from roulette.api import query_top_quota
 from roulette.constants import LEADERBOARD_TOP_N
-from roulette.gacha import get_snake_charm_holder, is_offline
+from roulette.gacha import get_offline_users, get_snake_charm_holder, is_offline
+
+
+def _resolve_member_name(
+    guild: Optional[discord.Guild], discord_id: int
+) -> Optional[str]:
+    """通过 discord_id 解析用户名，找不到返回 None。"""
+    if guild is None:
+        return None
+    member = guild.get_member(discord_id)
+    if member is None:
+        member = discord.utils.find(lambda m: m.id == discord_id, guild.members)
+    return member.name if member else None
 
 
 async def handle_leaderboard(message: discord.Message, client: httpx.AsyncClient) -> None:
     """处理「排行榜」命令。"""
-    top_users = await query_top_quota(client)
+    guild = message.guild
+    # 服务端排除：蛇符咒持有者 + 下线用户（按用户名传给 /top 的 exclude 参数）
+    snake_holder = get_snake_charm_holder()
+    exclude_names: set[str] = set()
+    if snake_holder is not None:
+        name = _resolve_member_name(guild, snake_holder)
+        if name:
+            exclude_names.add(name)
+    for discord_id in get_offline_users():
+        name = _resolve_member_name(guild, discord_id)
+        if name:
+            exclude_names.add(name)
+    top_users = await query_top_quota(client, exclude_names)
     if top_users is None:
         await message.channel.send("🏆 查询排行榜失败，请稍后再试。")
         return
     if not top_users:
         await message.channel.send("🏆 暂无排行数据。")
         return
-    guild = message.guild
-    snake_holder = get_snake_charm_holder()
     lines = ["🏆 **活动额度排行榜**"]
     rank = 0
     for username, quota in top_users:

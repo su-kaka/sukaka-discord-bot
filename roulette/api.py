@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from typing import Optional
+from typing import Iterable, Optional
 
 import httpx
 
@@ -51,16 +51,25 @@ async def adjust_quota(
         return None
 
 
-async def query_top_quota(client: httpx.AsyncClient) -> Optional[list[tuple[str, int]]]:
-    """查询活动额度前十用户，返回 (username, quota) 列表。"""
+async def query_top_quota(
+    client: httpx.AsyncClient, exclude: Optional[Iterable[str]] = None
+) -> Optional[list[tuple[str, int]]]:
+    """查询活动额度前十用户，返回 (username, quota) 列表。
+
+    exclude：需要排除的用户名，通过 /top 接口的 exclude 参数在服务端过滤，
+    被排除用户不占用榜单名次。
+    """
     api_key = os.getenv("ACTIVITY_QUOTA_API_KEY")
     if not api_key:
         return None
     api_base = os.getenv("ACTIVITY_QUOTA_API_BASE", DEFAULT_API_BASE)
+    exclude_names = [name for name in (exclude or []) if name]
+    params = {"exclude": ",".join(sorted(exclude_names))} if exclude_names else None
     try:
         response = await client.get(
             f"{api_base}/api/activity-quota/top",
             headers={"X-Activity-Quota-Key": api_key},
+            params=params,
         )
         data = response.json()
         if response.is_success and data.get("success") is True:
