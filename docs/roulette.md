@@ -45,7 +45,7 @@ start_roulette(bot)
 
 1. **关键词匹配是顺序敏感的**：`content.startswith(...)` 类（结婚/诅咒/决斗/抢劫/诱惑/你的名字）和 `content == ...` 类（其余）混排，新增关键词注意别被已有的前缀规则截胡。
 2. **冷却字典全部闭包在 `start_roulette()` 里**（`beg_cooldowns`、`duel_cooldowns` 等 dict[int, float]，存 `time.monotonic()` 到期时间），通过 `on_finish` 回调传给各 View 在结束时写入。重启即清零，属可接受设计。
-3. **被诅咒用户集合 `cursed_users`** 也是闭包状态，传给决斗/抢劫/梭哈逻辑。
+3. **诅咒/祝福等状态 buff 存 gacha.db 的 `active_buffs` 表**（`add_buff` / `has_buff` / `remove_buff` / `get_user_buffs`），重启不丢失；各游戏模块直接查表，不再传闭包集合。
 4. **下线状态**：用户使用「下线」卡后，其**下一次任意发言**解除下线（发提示消息），且**那次发言不触发掉落**（`skip_drop` 标志）。命令匹配在其之后，所以下线者发「赌大小」会先解除下线再正常执行命令。
 5. 所有命令都 return，掉落检查 `if not skip_drop` 放在**最后**——即执行了游戏命令的发言不再触发掉落。
 
@@ -65,7 +65,8 @@ start_roulette(bot)
   - `has_effect(user_id, key) -> bool`：只查不消费；
   - `is_offline(user_id) -> bool` / `clear_offline`：下线状态。
 - 唯一道具（蛇符咒、会员卡、流星雨、收藏家、诅咒之眼、神性）用单行表 `snake_charm_holder` / `membership_card_holder` / `meteor_shower_holder` / `collector_card_holder` / `curse_eye_holder` / `divinity_holder` 存持有者。抽到流星雨时立即清空该用户掉落冷却（`clear_drop_cooldown`），下一条发言即可掉落。收藏家持有期间，抽卡获得的背包道具次数**叠加**（重复抽到 +1，核心函数 `_add_effect_on_draw`）；未持有收藏家时重复抽到不叠加，但**保留已有数量不会重置**。抢劫偷来的背包道具一律叠加（+1）到自己的背包。
-- **神性**（`bless.py` 的 `handle_bless` + `handlers.py` 梭哈分支）：唯一道具，抽到即**解除身上的诅咒**（需 `handle_gacha(..., cursed_users)` 传入闭包集合），并解锁 `祝福 @某人` 能力。祝福写入背包 `bless` 效果（`_add_effect`，可被抢夺/变卖/交换），梭哈时：持有一念天堂则**覆盖祝福**（75% + 翻三倍，祝福不消耗保留）；否则祝福生效（成功率 `BLESS_ALLIN_SUCCESS_CHANCE` = 75%，倍率不变，结算后消耗）。每次祝福 `DIVINITY_EXHAUST_CHANCE`（50%）概率神力耗尽（`clear_divinity_holder` 销毁）。
+- **神性**（`bless.py` 的 `handle_bless` + `handlers.py` 梭哈分支）：唯一道具，抽到即**解除身上的诅咒**（`remove_buff(user, "curse")`），并解锁 `祝福 @某人` 能力。祝福写入 `active_buffs` 表的 `bless` buff（不进背包，不可被抢夺/变卖/交换，随「我的卡牌」展示在「身上状态」区），梭哈时：持有一念天堂则**覆盖祝福**（75% + 翻三倍，祝福不消耗保留）；否则祝福生效（成功率 `BLESS_ALLIN_SUCCESS_CHANCE` = 75%，倍率不变，结算后消耗）。每次祝福 `DIVINITY_EXHAUST_CHANCE`（50%）概率神力耗尽（`clear_divinity_holder` 销毁）。
+- **状态 buff 表 `active_buffs`**（`discord_id, buff_key, created_at`）：存诅咒/祝福这类非道具状态（`BUFF_POOL` 定义名称与描述）。与背包表 `gacha_effects` 的区别：buff 不占卡牌槽、不进抽卡池、不可被偷/卖/交换，「我的卡牌」单独展示。`_init_db()` 内含一次性迁移：历史版本误存进背包表的 `bless` 会自动迁入 buff 表。
 - **诅咒之眼**（`curse.py` 的 `_settle_curse_eye`）：持有者发送 `诅咒 @某人` 时**在普通诅咒流程（押 10 点、冷却、必输 debuff）正常结算之后额外叠加**——目标额度重置为 `CURSE_EYE_QUOTA_MIN`-`CURSE_EYE_QUOTA_MAX`（0-1000）随机值，每次使用 `CURSE_EYE_DESTROY_CHANCE`（44.44%）概率销毁（`clear_curse_eye_holder`）。效果**无法被借刀杀人反弹**（借刀杀人只转嫁普通诅咒）；持有者可发送 `诅咒 @自己`（不押点、不受冷却，仅诅咒之眼效果，不入诅咒名单）。普通诅咒逻辑不变，未持有者无此效果。
 - 身体交换（你的名字卡）存 `body_swaps` 表，`restore_body_swaps` 后台任务在 5 分钟后换回。
 - **循环依赖规避惯例**：`packet_base.py`、`quota_drop.py` 等在函数体内延迟 `from roulette.gacha import ...`，因为 gacha 又 import 了 packet_base。新增跨模块引用时沿用此惯例。
@@ -90,7 +91,7 @@ start_roulette(bot)
 
 | DB | 表 | 说明 |
 | --- | --- | --- |
-| `gacha.db` | gacha_effects / snake_charm_holder / membership_card_holder / meteor_shower_holder / collector_card_holder / curse_eye_holder / divinity_holder / body_swaps / offline_users | 卡牌效果与特殊状态 |
+| `gacha.db` | gacha_effects / snake_charm_holder / membership_card_holder / meteor_shower_holder / collector_card_holder / curse_eye_holder / divinity_holder / active_buffs / body_swaps / offline_users | 卡牌效果、唯一道具、状态 buff 与特殊状态 |
 | `bank.db` | bank_accounts / bank_hatred / bank_heist_cooldowns 等 | 银行存款与抢劫 |
 | `lottery.db` | lottery_pool | 彩票奖池（单行） |
 | `quota_drops.db` | drop_cooldowns | 掉落冷却 |

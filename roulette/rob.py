@@ -19,14 +19,13 @@ from roulette.constants import (
     ROB_MIN_PERCENT,
     ROB_MIN_QUOTA,
 )
-from roulette.gacha import consume_effect, has_effect, is_offline, steal_random_card
+from roulette.gacha import consume_effect, has_buff, has_effect, is_offline, remove_buff, steal_random_card
 
 
 async def handle_rob(
     message: discord.Message,
     client: httpx.AsyncClient,
     rob_cooldowns: dict[int, float],
-    cursed_users: set[int],
 ) -> None:
     """处理「抢劫 @某人」命令。"""
     if not message.mentions:
@@ -93,8 +92,8 @@ async def handle_rob(
                 target = scapegoat
 
     # 诅咒生效：被诅咒者抢劫必被反杀
-    if message.author.id in cursed_users:
-        cursed_users.discard(message.author.id)
+    if has_buff(message.author.id, "curse"):
+        remove_buff(message.author.id, "curse")
         success = False
         await message.channel.send(
             f"🔮 诅咒生效！{message.author.mention} 的抢劫注定失败！{scapegoat_note}"

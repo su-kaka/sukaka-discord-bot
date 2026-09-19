@@ -7,7 +7,7 @@ import random
 import discord
 
 from roulette.constants import DIVINITY_EXHAUST_CHANCE
-from roulette.gacha import _add_effect, clear_divinity_holder, has_divinity, has_effect, is_offline
+from roulette.gacha import add_buff, clear_divinity_holder, has_buff, has_divinity, is_offline
 
 
 async def handle_bless(message: discord.Message) -> None:
@@ -32,12 +32,12 @@ async def handle_bless(message: discord.Message) -> None:
     if is_offline(target.id):
         await message.channel.send(f"🔌 {target.mention} 处于下线状态，无法被祝福！")
         return
-    if has_effect(target.id, "bless"):
+    if has_buff(target.id, "bless"):
         await message.channel.send(f"✨ {target.mention} 已经受到祝福的眷顾了。")
         return
 
-    # 授予祝福效果（进背包，随「我的卡牌」展示，可被抢夺/变卖/交换）
-    _add_effect(target.id, "bless", 1)
+    # 授予祝福 buff（存 active_buffs，不进背包，不可被抢夺/变卖/交换）
+    add_buff(target.id, "bless")
 
     # 每次祝福有概率神力耗尽（神性销毁）
     if random.random() < DIVINITY_EXHAUST_CHANCE:

@@ -21,14 +21,19 @@ from roulette.constants import (
     CURSE_EYE_QUOTA_MAX,
     CURSE_EYE_QUOTA_MIN,
 )
-from roulette.gacha import clear_curse_eye_holder, has_curse_eye, is_offline
+from roulette.gacha import (
+    add_buff,
+    clear_curse_eye_holder,
+    has_buff,
+    has_curse_eye,
+    is_offline,
+)
 
 
 async def handle_curse(
     message: discord.Message,
     client: httpx.AsyncClient,
     curse_cooldowns: dict[int, float],
-    cursed_users: set[int],
 ) -> None:
     """处理「诅咒 @某人」命令。"""
     if not message.mentions:
@@ -49,7 +54,7 @@ async def handle_curse(
     if is_offline(target.id):
         await message.channel.send(f"🔌 {target.mention} 处于下线状态，无法被诅咒！")
         return
-    if target.id in cursed_users:
+    if has_buff(target.id, "curse"):
         await message.channel.send(f"🔮 {target.mention} 已经身中诅咒了。")
         return
 
@@ -114,7 +119,7 @@ async def handle_curse(
         if scapegoat_note:
             curse_eye_note += f"\n👁️ 借刀杀人可以转嫁普通诅咒，但无法反弹 **诅咒之眼** 的凝视！"
 
-    cursed_users.add(target.id)
+    add_buff(target.id, "curse")
     await message.channel.send(
         f"🔮 {message.author.mention} 诅咒了 {target.mention}！\n"
         f"{target.mention} 下次抢劫必被反杀、决斗必输、梭哈必输（生效一次后解除）。{scapegoat_note}{curse_eye_note}"

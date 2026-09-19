@@ -91,6 +91,12 @@ INSTANT_SETTLE_CARDS = {"robinhood", "selfdestruct", "error", "inflation", "depo
 # 唯一道具卡牌（选择后立即替换持有者，不进背包）
 UNIQUE_CARDS = {"snake", "membership", "meteor", "collector", "curseeye", "divinity"}
 
+# 状态 buff 定义（诅咒/祝福，不进背包，存 active_buffs 表）：key -> (名称, 描述)
+BUFF_POOL: dict[str, tuple[str, str]] = {
+    "curse": ("诅咒", "下次抢劫必被反杀、决斗必输、梭哈必输，生效一次后解除"),
+    "bless": ("祝福", "梭哈成功率提高到 75%（不与一念天堂叠加，一念天堂覆盖时保留）"),
+}
+
 
 def _init_db() -> None:
     """建表：用户卡牌效果 + 蛇符咒唯一持有者。"""
@@ -160,6 +166,25 @@ def _init_db() -> None:
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS active_buffs (
+                discord_id INTEGER NOT NULL,
+                buff_key TEXT NOT NULL,
+                created_at REAL NOT NULL,
+                PRIMARY KEY (discord_id, buff_key)
+            )
+            """
+        )
+        # 一次性迁移：历史版本把祝福写进了背包表（不在 CARD_POOL，显示为原始 key），迁到 buff 表
+        migrated = conn.execute(
+            """
+            INSERT OR IGNORE INTO active_buffs (discord_id, buff_key, created_at)
+            SELECT discord_id, 'bless', created_at FROM gacha_effects WHERE card_key = 'bless'
+            """
+        ).rowcount
+        if migrated:
+            conn.execute("DELETE FROM gacha_effects WHERE card_key = 'bless'")
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS body_swaps (
@@ -403,6 +428,50 @@ def clear_divinity_holder() -> None:
         conn.execute("DELETE FROM divinity_holder WHERE id = 1")
 
 
+def add_buff(discord_id: int, buff_key: str) -> None:
+    """添加状态 buff（诅咒/祝福），已存在则刷新时间。"""
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute(
+            """
+            INSERT INTO active_buffs (discord_id, buff_key, created_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(discord_id, buff_key) DO UPDATE SET
+                created_at = excluded.created_at
+            """,
+            (discord_id, buff_key, time.time()),
+        )
+
+
+def has_buff(discord_id: int, buff_key: str) -> bool:
+    """是否带有状态 buff。"""
+    with sqlite3.connect(DB_PATH) as conn:
+        row = conn.execute(
+            "SELECT 1 FROM active_buffs WHERE discord_id = ? AND buff_key = ?",
+            (discord_id, buff_key),
+        ).fetchone()
+    return row is not None
+
+
+def remove_buff(discord_id: int, buff_key: str) -> bool:
+    """移除状态 buff，返回是否原本存在。"""
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.execute(
+            "DELETE FROM active_buffs WHERE discord_id = ? AND buff_key = ?",
+            (discord_id, buff_key),
+        )
+        return cursor.rowcount > 0
+
+
+def get_user_buffs(discord_id: int) -> list[str]:
+    """查询用户身上所有状态 buff key。"""
+    with sqlite3.connect(DB_PATH) as conn:
+        rows = conn.execute(
+            "SELECT buff_key FROM active_buffs WHERE discord_id = ?",
+            (discord_id,),
+        ).fetchall()
+    return [row[0] for row in rows]
+
+
 def _stack_effect(discord_id: int, card_key: str, amount: int = 1) -> int:
     """叠加道具数量（+amount），返回叠加后的当前次数。"""
     with sqlite3.connect(DB_PATH) as conn:
@@ -540,9 +609,10 @@ def steal_random_card(robber_id: int, target_id: int) -> Optional[str]:
 
 
 async def handle_my_cards(message: discord.Message) -> None:
-    """处理「我的卡牌」命令：查看持有的持续型卡牌。"""
+    """处理「我的卡牌」命令：查看持有的持续型卡牌与身上状态。"""
     cards = get_user_cards(message.author.id)
-    if not cards:
+    buffs = get_user_buffs(message.author.id)
+    if not cards and not buffs:
         await message.channel.send("🎴 你目前没有生效中的卡牌。")
         return
 
@@ -550,6 +620,11 @@ async def handle_my_cards(message: discord.Message) -> None:
     for card_key, remaining in cards:
         name, desc, _ = CARD_POOL.get(card_key, (card_key, "未知效果", 0))
         lines.append(f"• **{name}** ×{remaining} — {desc}")
+    if buffs:
+        lines.append("🌀 身上状态：")
+        for buff_key in buffs:
+            buff_name, buff_desc = BUFF_POOL.get(buff_key, (buff_key, "未知效果"))
+            lines.append(f"• **{buff_name}** — {buff_desc}")
     await message.channel.send("\n".join(lines))
 
 
@@ -557,7 +632,6 @@ async def handle_gacha(
     message: discord.Message,
     client: httpx.AsyncClient,
     gacha_cooldowns: dict[int, float],
-    cursed_users: Optional[set[int]] = None,
 ) -> None:
     """处理「抽卡」命令。"""
     now = time.monotonic()
@@ -593,7 +667,7 @@ async def handle_gacha(
 
     # 十连抽生效：自动抽十次
     if consume_effect(message.author.id, "multidraw"):
-        await _handle_multidraw(message, client, cost, cursed_users)
+        await _handle_multidraw(message, client, cost)
         return
 
     card_key = _draw_card()
@@ -692,26 +766,7 @@ async def handle_gacha(
         transfer_note = ""
         if old_holder and old_holder != message.author.id:
             transfer_note = f"\n✨ 神性已从 <@{old_holder}> 手中转移！"
-        purge_note = "\n🔮 抽到神性，身上缠绕的诅咒已解除！" if message.author.id in cursed_users else ""
-        if purge_note:
-            cursed_users.discard(message.author.id)
-        await message.channel.send(
-            f"🎴 {message.author.mention} 消耗 {cost} 点抽卡……\n"
-            f"✨ **{name}**！{desc}。{transfer_note}{purge_note}"
-        )
-        return
-
-    # 神性：唯一道具，立即替换持有者，并解除身上的诅咒
-    if card_key == "divinity":
-        old_holder = get_divinity_holder()
-        set_divinity_holder(message.author.id)
-        transfer_note = ""
-        if old_holder and old_holder != message.author.id:
-            transfer_note = f"\n✨ 神性已从 <@{old_holder}> 手中转移！"
-        purge_note = ""
-        if cursed_users and message.author.id in cursed_users:
-            cursed_users.discard(message.author.id)
-            purge_note = "\n🔮 抽到神性，身上缠绕的诅咒已解除！"
+        purge_note = "\n🔮 抽到神性，身上缠绕的诅咒已解除！" if remove_buff(message.author.id, "curse") else ""
         await message.channel.send(
             f"🎴 {message.author.mention} 消耗 {cost} 点抽卡……\n"
             f"✨ **{name}**！{desc}。{transfer_note}{purge_note}"
@@ -767,7 +822,6 @@ async def _handle_multidraw(
     message: discord.Message,
     client: httpx.AsyncClient,
     cost: int,
-    cursed_users: Optional[set[int]] = None,
 ) -> None:
     """十连抽：一次抽十张卡，逐张结算（自爆/许愿池卡不进十连池子）。"""
     lines = [f"🎴 {message.author.mention} 发动 **十连抽**！消耗 {cost} 点抽十次："]
@@ -826,9 +880,7 @@ async def _handle_multidraw(
             old_holder = get_divinity_holder()
             set_divinity_holder(message.author.id)
             transfer_note = f"（从 <@{old_holder}> 手中转移）" if old_holder and old_holder != message.author.id else ""
-            purge_note = "（诅咒已解除）" if cursed_users and message.author.id in cursed_users else ""
-            if purge_note:
-                cursed_users.discard(message.author.id)
+            purge_note = "（诅咒已解除）" if remove_buff(message.author.id, "curse") else ""
             lines.append(f"{i+1}. ✨ **{name}**！{desc}{transfer_note}{purge_note}")
             continue
 
@@ -1547,6 +1599,8 @@ class WishPoolView(discord.ui.View):
             old_holder = getter()
             setter(self.user_id)
             transfer_note = f"\n⏭️ 已从 <@{old_holder}> 手中转移！" if old_holder and old_holder != self.user_id else ""
+            if card_key == "divinity" and remove_buff(self.user_id, "curse"):
+                transfer_note += "\n🔮 抽到神性，身上缠绕的诅咒已解除！"
             if card_key == "meteor":
                 from roulette.quota_drop import clear_drop_cooldown
 

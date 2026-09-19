@@ -81,8 +81,9 @@ from roulette.gacha import (
     handle_offline,
     handle_seduce,
     handle_yourname,
-    has_effect,
+    has_buff,
     is_offline,
+    remove_buff,
     restore_body_swaps,
 )
 from roulette.leaderboard import handle_leaderboard
@@ -110,7 +111,6 @@ def start_roulette(bot: "SukakaBot") -> None:
     allin_cooldowns: dict[int, float] = {}
     gacha_cooldowns: dict[int, float] = {}
     heist_cooldowns: dict[int, float] = {}
-    cursed_users: set[int] = set()  # 被诅咒的用户 ID
 
     asyncio.create_task(
         big_red_packet_loop(bot, client),
@@ -183,7 +183,7 @@ def start_roulette(bot: "SukakaBot") -> None:
 
         # 诅咒：诅咒 @某人
         if content.startswith(CURSE_KEYWORD):
-            await handle_curse(message, client, curse_cooldowns, cursed_users)
+            await handle_curse(message, client, curse_cooldowns)
             return
 
         # 祝福：祝福 @某人（神性持有者专属）
@@ -222,7 +222,7 @@ def start_roulette(bot: "SukakaBot") -> None:
             # 挑衅卡生效：对方无法拒绝，决斗立即自动结算
             provoked = consume_effect(message.author.id, "provoke")
 
-            view = DuelView(message.author, opponent, client, on_finish=_duel_cooldown, cursed_users=cursed_users, provoked=provoked)
+            view = DuelView(message.author, opponent, client, on_finish=_duel_cooldown, provoked=provoked)
             if provoked:
                 view.message = await message.channel.send(
                     f"⚔️ {message.author.mention} 向 {opponent.mention} 发起决斗！\n"
@@ -243,7 +243,7 @@ def start_roulette(bot: "SukakaBot") -> None:
 
         # 抢劫：抢劫 @某人
         if content.startswith(ROB_KEYWORD):
-            await handle_rob(message, client, rob_cooldowns, cursed_users)
+            await handle_rob(message, client, rob_cooldowns)
             return
 
         # 排行榜：展示活动额度前十用户
@@ -253,7 +253,7 @@ def start_roulette(bot: "SukakaBot") -> None:
 
         # 抽卡：10 点抽一张魔法卡
         if content == GACHA_KEYWORD:
-            await handle_gacha(message, client, gacha_cooldowns, cursed_users)
+            await handle_gacha(message, client, gacha_cooldowns)
             return
 
         # 我的卡牌：查看持有的持续型卡牌
@@ -360,7 +360,7 @@ def start_roulette(bot: "SukakaBot") -> None:
             # 一念天堂生效：成功概率提升到 75%，成功翻三倍（覆盖祝福，祝福不消耗）
             heaven = consume_effect(message.author.id, "heaven")
             # 祝福生效：成功概率提高到 75%（不与一念天堂叠加，倍率不变）
-            bless = False if heaven else has_effect(message.author.id, "bless")
+            bless = False if heaven else has_buff(message.author.id, "bless")
             if heaven:
                 success_chance = 0.75
             elif bless:
@@ -372,10 +372,10 @@ def start_roulette(bot: "SukakaBot") -> None:
             has_retry = consume_effect(message.author.id, "retry")
             retry_note = ""
 
-            # 诅咒生效：被诅咒者梭哈必输
+            # 诅咒生效：被诅咒者梭哈必输（存 active_buffs 表，重启不丢失）
             curse_note = ""
-            if message.author.id in cursed_users:
-                cursed_users.discard(message.author.id)
+            if has_buff(message.author.id, "curse"):
+                remove_buff(message.author.id, "curse")
                 success = False
                 curse_note = f"\n🔮 诅咒生效！{message.author.mention} 的梭哈注定失败！"
             else:
@@ -398,8 +398,8 @@ def start_roulette(bot: "SukakaBot") -> None:
                 heaven_note = "\n🃏 一念天堂生效！成功概率提升，翻三倍！" if heaven else ""
                 bless_note = ""
                 if bless:
-                    # 梭哈结算后祝福消耗（一念天堂覆盖时祝福不消耗，保留在背包）
-                    consume_effect(message.author.id, "bless")
+                    # 梭哈结算后祝福消耗（一念天堂覆盖时祝福不消耗，保留在身上）
+                    remove_buff(message.author.id, "bless")
                     bless_note = "\n✨ 祝福生效！梭哈成功率提升到 75%！"
                 if new_quota is None:
                     await message.channel.send(
@@ -416,7 +416,7 @@ def start_roulette(bot: "SukakaBot") -> None:
                 bless_note = ""
                 if bless:
                     # 失败结算后祝福同样消耗（成功率判定已用过，与一念天堂行为一致）
-                    consume_effect(message.author.id, "bless")
+                    remove_buff(message.author.id, "bless")
                     bless_note = "\n✨ 祝福生效了，但这次连神明也没有眷顾你……"
                 notyet = consume_effect(message.author.id, "notyet")
                 if notyet:

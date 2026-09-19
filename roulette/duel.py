@@ -21,7 +21,6 @@ class DuelView(discord.ui.View):
         opponent: discord.Member | discord.User,
         client: httpx.AsyncClient,
         on_finish: Optional[object] = None,
-        cursed_users: Optional[set[int]] = None,
         provoked: bool = False,
     ) -> None:
         super().__init__(timeout=DUEL_TIMEOUT_SECONDS)
@@ -31,7 +30,6 @@ class DuelView(discord.ui.View):
         self.message: Optional[discord.Message] = None
         self.completed = False
         self._on_finish = on_finish
-        self._cursed_users = cursed_users if cursed_users is not None else set()
         self._provoked = provoked
         if provoked:
             # 挑衅生效：移除拒绝按钮
@@ -105,18 +103,18 @@ class DuelView(discord.ui.View):
         while c_roll == o_roll:
             c_roll, o_roll = random.randint(1, 100), random.randint(1, 100)
 
-        from roulette.gacha import consume_effect
+        from roulette.gacha import consume_effect, has_buff, remove_buff
 
         # 诅咒生效：被诅咒者决斗必输
         curse_note = ""
-        c_cursed = self.challenger.id in self._cursed_users
-        o_cursed = self.opponent.id in self._cursed_users
+        c_cursed = has_buff(self.challenger.id, "curse")
+        o_cursed = has_buff(self.opponent.id, "curse")
         if c_cursed and not o_cursed:
-            self._cursed_users.discard(self.challenger.id)
+            remove_buff(self.challenger.id, "curse")
             winner, loser = self.opponent, self.challenger
             curse_note = f"\n🔮 诅咒生效！{self.challenger.mention} 注定失败！"
         elif o_cursed and not c_cursed:
-            self._cursed_users.discard(self.opponent.id)
+            remove_buff(self.opponent.id, "curse")
             winner, loser = self.challenger, self.opponent
             curse_note = f"\n🔮 诅咒生效！{self.opponent.mention} 注定失败！"
         else:
