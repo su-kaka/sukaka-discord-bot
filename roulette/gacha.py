@@ -1263,7 +1263,7 @@ async def handle_offline(
         f"🔌 {message.author.mention} 使用 **下线**！\n"
         f"💥 额度从 **{quota} 点** 重置为 **{OFFLINE_RESET_QUOTA} 点**，"
         f"银行存款 **{old_balance} 点** 已清空！\n"
-        f"📴 已进入下线状态：无法被任何交换选择、无法抢红包、无法发言掉落额度。\n"
+        f"📴 已进入下线状态：无法被任何交互选择、无法抢红包、无法发言掉落额度。\n"
         f"💬 下次任意发言将解除下线状态。"
     )
 
