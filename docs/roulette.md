@@ -30,7 +30,7 @@ start_roulette(bot)
 | `big_red_packet.py` | 60 | 机器人大红包：每 6 分钟 500 点奖池 |
 | `rob.py` | 181 | 抢劫：50% 成功率，卡牌效果多 |
 | `marry.py` | 140 | 结婚：双方额度合并扣 10% 后平分 |
-| `curse.py` | 88 | 诅咒：10 点使目标下次抢劫/决斗/梭哈必输 |
+| `curse.py` | 88 | 诅咒：10 点使目标下次抢劫/决斗/梭哈必输；诅咒之眼持有者叠加额度重置效果 |
 | `gacha.py` | 1006 | 抽卡：卡池定义、效果存取、下线/身体交换/诱惑等特殊玩法 |
 | `bank.py` | 411 | 地精银行：存款、安保、贷款 |
 | `bank_heist.py` | 371 | 抢银行：三人组队选装备 |
@@ -63,7 +63,8 @@ start_roulette(bot)
   - `consume_effect(user_id, key) -> bool`：读出即消费（一次性卡）；
   - `has_effect(user_id, key) -> bool`：只查不消费；
   - `is_offline(user_id) -> bool` / `clear_offline`：下线状态。
-- 唯一道具（蛇符咒、会员卡、流星雨、收藏家）用单行表 `snake_charm_holder` / `membership_card_holder` / `meteor_shower_holder` / `collector_card_holder` 存持有者。抽到流星雨时立即清空该用户掉落冷却（`clear_drop_cooldown`），下一条发言即可掉落。收藏家持有期间，抽卡获得的背包道具次数**叠加**（重复抽到 +1，核心函数 `_add_effect_on_draw`）；未持有收藏家时重复抽到不叠加，但**保留已有数量不会重置**。抢劫偷来的背包道具一律叠加（+1）到自己的背包。
+- 唯一道具（蛇符咒、会员卡、流星雨、收藏家、诅咒之眼）用单行表 `snake_charm_holder` / `membership_card_holder` / `meteor_shower_holder` / `collector_card_holder` / `curse_eye_holder` 存持有者。抽到流星雨时立即清空该用户掉落冷却（`clear_drop_cooldown`），下一条发言即可掉落。收藏家持有期间，抽卡获得的背包道具次数**叠加**（重复抽到 +1，核心函数 `_add_effect_on_draw`）；未持有收藏家时重复抽到不叠加，但**保留已有数量不会重置**。抢劫偷来的背包道具一律叠加（+1）到自己的背包。
+- **诅咒之眼**（`curse.py` 的 `_settle_curse_eye`）：持有者发送 `诅咒 @某人` 时**在普通诅咒流程（押 10 点、冷却、必输 debuff）正常结算之后额外叠加**——目标额度重置为 `CURSE_EYE_QUOTA_MIN`-`CURSE_EYE_QUOTA_MAX`（0-1000）随机值，每次使用 `CURSE_EYE_DESTROY_CHANCE`（50%）概率销毁（`clear_curse_eye_holder`）。普通诅咒逻辑不变，未持有者无此效果。
 - 身体交换（你的名字卡）存 `body_swaps` 表，`restore_body_swaps` 后台任务在 5 分钟后换回。
 - **循环依赖规避惯例**：`packet_base.py`、`quota_drop.py` 等在函数体内延迟 `from roulette.gacha import ...`，因为 gacha 又 import 了 packet_base。新增跨模块引用时沿用此惯例。
 - 立即结算型卡牌（劫富济贫/自爆/错误/通货膨胀/存为王/变卖家产）不写 `gacha_effects`，抽到即触发。变卖家产**从背包随机选出若干种道具，每种卖掉全部持有数量**（唯一道具卖掉后清除持有记录），按 `GACHA_SELLOUT_PRICE`（100 点/张）发放额度。
@@ -87,7 +88,7 @@ start_roulette(bot)
 
 | DB | 表 | 说明 |
 | --- | --- | --- |
-| `gacha.db` | gacha_effects / snake_charm_holder / membership_card_holder / meteor_shower_holder / collector_card_holder / body_swaps / offline_users | 卡牌效果与特殊状态 |
+| `gacha.db` | gacha_effects / snake_charm_holder / membership_card_holder / meteor_shower_holder / collector_card_holder / curse_eye_holder / body_swaps / offline_users | 卡牌效果与特殊状态 |
 | `bank.db` | bank_accounts / bank_hatred / bank_heist_cooldowns 等 | 银行存款与抢劫 |
 | `lottery.db` | lottery_pool | 彩票奖池（单行） |
 | `quota_drops.db` | drop_cooldowns | 掉落冷却 |
