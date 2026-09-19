@@ -99,7 +99,7 @@ async def handle_curse(
     cursed_users.add(target.id)
     await message.channel.send(
         f"🔮 {message.author.mention} 诅咒了 {target.mention}！\n"
-        f"{target.mention} 下次抢劫必被反杀、决斗必输（生效一次后解除）。{scapegoat_note}{curse_eye_note}"
+        f"{target.mention} 下次抢劫必被反杀、决斗必输、梭哈必输（生效一次后解除）。{scapegoat_note}{curse_eye_note}"
     )
 
 
