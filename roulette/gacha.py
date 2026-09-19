@@ -691,6 +691,31 @@ async def _handle_multidraw(message: discord.Message, client: httpx.AsyncClient,
     await message.channel.send("\n".join(lines))
 
 
+def _get_exclude_names(message: discord.Message) -> set[str]:
+    """构建 /top 查询的排除名单：蛇符咒持有者 + 下线用户（按用户名）。"""
+    exclude_names: set[str] = set()
+    guild = message.guild
+    if guild is None:
+        return exclude_names
+    snake_holder = get_snake_charm_holder()
+    if snake_holder is not None:
+        member = guild.get_member(snake_holder)
+        if member:
+            exclude_names.add(member.name)
+    for discord_id in get_offline_users():
+        member = guild.get_member(discord_id)
+        if member:
+            exclude_names.add(member.name)
+    return exclude_names
+
+
+async def _get_top_quota_excluded(
+    message: discord.Message, client: httpx.AsyncClient
+) -> Optional[list[tuple[str, int]]]:
+    """查询排行榜，服务端排除蛇符咒持有者和下线用户（不占用前十名额）。"""
+    return await query_top_quota(client, _get_exclude_names(message))
+
+
 async def _settle_error(message: discord.Message, client: httpx.AsyncClient) -> None:
     """错误：将额度重置为 1-1000 之间的随机值。"""
     quota = await query_quota(client, message.author.name)
@@ -717,7 +742,7 @@ async def _settle_error(message: discord.Message, client: httpx.AsyncClient) -> 
 
 async def _settle_robinhood(message: discord.Message, client: httpx.AsyncClient) -> None:
     """劫富济贫：排名前十的用户随机分你他们额度的 1%-10%。"""
-    top_users = await query_top_quota(client)
+    top_users = await _get_top_quota_excluded(message)
     if not top_users:
         await message.channel.send("🎴 劫富济贫失败：暂无排行数据。")
         return
@@ -786,7 +811,7 @@ class SelfDestructPacketView(PacketView):
 
 async def _settle_depositking(message: discord.Message, client: httpx.AsyncClient) -> None:
     """存为王：排行榜前十名用户自动存款一次（额度的 50% 存入银行）。"""
-    top_users = await query_top_quota(client)
+    top_users = await _get_top_quota_excluded(message)
     if not top_users:
         await message.channel.send("🏦 存为王失败：暂无排行数据。")
         return
