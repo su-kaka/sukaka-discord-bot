@@ -35,6 +35,8 @@ from roulette.constants import (
     BANKER_KEYWORD,
     BANKER_MIN_QUOTA,
     BANKER_RUN_KEYWORD,
+    BLESS_KEYWORD,
+    BLESS_ALLIN_SUCCESS_CHANCE,
     CURSE_KEYWORD,
     DUEL_COOLDOWN_SECONDS,
     DUEL_FEE_PERCENT,
@@ -67,6 +69,7 @@ from roulette.constants import (
 )
 from roulette.bank import handle_bank_balance, handle_deposit, handle_loan, handle_withdraw
 from roulette.bank_heist import auto_heist_loop, handle_bank_heist
+from roulette.bless import handle_bless
 from roulette.curse import handle_curse
 from roulette.dice_game import DiceGame
 from roulette.duel import DuelView
@@ -78,6 +81,7 @@ from roulette.gacha import (
     handle_offline,
     handle_seduce,
     handle_yourname,
+    has_effect,
     is_offline,
     restore_body_swaps,
 )
@@ -182,6 +186,11 @@ def start_roulette(bot: "SukakaBot") -> None:
             await handle_curse(message, client, curse_cooldowns, cursed_users)
             return
 
+        # 祝福：祝福 @某人（神性持有者专属）
+        if content.startswith(BLESS_KEYWORD):
+            await handle_bless(message)
+            return
+
         # 决斗：决斗 @某人
         if content.startswith(DUEL_KEYWORD):
             if not message.mentions:
@@ -244,7 +253,7 @@ def start_roulette(bot: "SukakaBot") -> None:
 
         # 抽卡：10 点抽一张魔法卡
         if content == GACHA_KEYWORD:
-            await handle_gacha(message, client, gacha_cooldowns)
+            await handle_gacha(message, client, gacha_cooldowns, cursed_users)
             return
 
         # 我的卡牌：查看持有的持续型卡牌
@@ -348,9 +357,16 @@ def start_roulette(bot: "SukakaBot") -> None:
                 return
 
             stake = quota  # 全部额度作为赌注
-            # 一念天堂生效：成功概率提升到 75%，成功翻四倍
+            # 一念天堂生效：成功概率提升到 75%，成功翻三倍（覆盖祝福，祝福不消耗）
             heaven = consume_effect(message.author.id, "heaven")
-            success_chance = 0.75 if heaven else 0.5
+            # 祝福生效：成功概率提高到 75%（不与一念天堂叠加，倍率不变）
+            bless = False if heaven else has_effect(message.author.id, "bless")
+            if heaven:
+                success_chance = 0.75
+            elif bless:
+                success_chance = BLESS_ALLIN_SUCCESS_CHANCE
+            else:
+                success_chance = 0.5
 
             # 这把不算！：失败后可重来一次
             has_retry = consume_effect(message.author.id, "retry")
@@ -380,6 +396,11 @@ def start_roulette(bot: "SukakaBot") -> None:
                 prize = gross_prize - fee
                 new_quota = await adjust_quota(client, "grant", message.author.name, prize)
                 heaven_note = "\n🃏 一念天堂生效！成功概率提升，翻三倍！" if heaven else ""
+                bless_note = ""
+                if bless:
+                    # 梭哈结算后祝福消耗（一念天堂覆盖时祝福不消耗，保留在背包）
+                    consume_effect(message.author.id, "bless")
+                    bless_note = "\n✨ 祝福生效！梭哈成功率提升到 75%！"
                 if new_quota is None:
                     await message.channel.send(
                         f"🎰 {message.author.mention} 梭哈 **{quota} 点** 翻倍成功！"
@@ -388,10 +409,15 @@ def start_roulette(bot: "SukakaBot") -> None:
                     return
                 await message.channel.send(
                     f"🎰🎉 {message.author.mention} 梭哈 **{quota} 点**\n"
-                    f"🃏 翻倍成功！毛奖金 **{gross_prize} 点**，手续费 {fee} 点（{ALLIN_FEE_PERCENT}%）销毁，实得 **{prize} 点**，当前额度 {new_quota} 点！{heaven_note}{retry_note}"
+                    f"🃏 翻倍成功！毛奖金 **{gross_prize} 点**，手续费 {fee} 点（{ALLIN_FEE_PERCENT}%）销毁，实得 **{prize} 点**，当前额度 {new_quota} 点！{heaven_note}{bless_note}{retry_note}"
                 )
             else:
                 # 时候未到！：归零时自动恢复 50 点
+                bless_note = ""
+                if bless:
+                    # 失败结算后祝福同样消耗（成功率判定已用过，与一念天堂行为一致）
+                    consume_effect(message.author.id, "bless")
+                    bless_note = "\n✨ 祝福生效了，但这次连神明也没有眷顾你……"
                 notyet = consume_effect(message.author.id, "notyet")
                 if notyet:
                     recovered = await adjust_quota(client, "grant", message.author.name, GACHA_NOTYET_RECOVER)
@@ -401,7 +427,7 @@ def start_roulette(bot: "SukakaBot") -> None:
                 # 清零：全部销毁
                 await message.channel.send(
                     f"🎰💥 {message.author.mention} 梭哈 **{quota} 点**\n"
-                    f"🃏 运气不佳，全部清零！当前额度 0 点。{curse_note}{retry_note}{notyet_note}"
+                    f"🃏 运气不佳，全部清零！当前额度 0 点。{curse_note}{bless_note}{retry_note}{notyet_note}"
                 )
             return
 

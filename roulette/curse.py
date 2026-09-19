@@ -1,7 +1,9 @@
 """诅咒：押 10 点（全销毁），被诅咒者下次抢劫必被反杀、决斗必输、梭哈必输。
 
 诅咒之眼（唯一道具）：持有者诅咒 @某人 时叠加触发——目标额度重置为 0-1000 随机值，
-每次使用 44.44% 概率销毁（CURSE_EYE_DESTROY_CHANCE）。"""
+每次使用 44.44% 概率销毁（CURSE_EYE_DESTROY_CHANCE）。
+
+增强：诅咒之眼效果无法被借刀杀人反弹；持有者可诅咒自己（仅诅咒之眼效果，不押点）。"""
 
 from __future__ import annotations
 
@@ -35,9 +37,11 @@ async def handle_curse(
             "被诅咒者下次抢劫必被反杀、决斗必输、梭哈必输，生效一次后解除。"
         )
         return
+    has_eye = has_curse_eye(message.author.id)
     target = message.mentions[0]
-    if target.id == message.author.id:
-        await message.channel.send("🔮 不能诅咒自己。")
+    # 持有诅咒之眼时允许诅咒自己（仅诅咒之眼效果生效，普通诅咒仍不可自咒）
+    if target.id == message.author.id and not has_eye:
+        await message.channel.send("🔮 不能诅咒自己。（持有诅咒之眼时可以）")
         return
     if target.bot:
         await message.channel.send("🔮 不能诅咒机器人。")
@@ -47,6 +51,15 @@ async def handle_curse(
         return
     if target.id in cursed_users:
         await message.channel.send(f"🔮 {target.mention} 已经身中诅咒了。")
+        return
+
+    # 诅咒自己时走纯诅咒之眼流程：不押 10 点、不受冷却，额度重置后不入诅咒名单
+    if target.id == message.author.id:
+        eye_note = await _settle_curse_eye(message, client, target)
+        await message.channel.send(
+            f"👁️ {message.author.mention} 将 **诅咒之眼** 对准了自己！\n"
+            f"🔮 普通诅咒对自己无效，只有诅咒之眼的效果生效。{eye_note}"
+        )
         return
 
     now = time.monotonic()
@@ -74,6 +87,8 @@ async def handle_curse(
     curse_cooldowns[message.author.id] = now + CURSE_COOLDOWN_SECONDS
 
     # 借刀杀人：被诅咒时随机转嫁给别人（从银行存款用户中选）
+    # 诅咒之眼无法被借刀杀人反弹：始终命中最初目标，先固定原始目标
+    original_target = target
     from roulette.gacha import consume_effect
     from roulette.bank import get_all_accounts_with_min_balance
     scapegoat_note = ""
@@ -92,9 +107,12 @@ async def handle_curse(
                 target = scapegoat
 
     # 诅咒之眼（唯一道具）：在普通诅咒成功的基础上额外叠加额度重置效果
+    # 借刀杀人只能转嫁普通诅咒，诅咒之眼无视反弹、直接命中最初目标
     curse_eye_note = ""
-    if has_curse_eye(message.author.id):
-        curse_eye_note = await _settle_curse_eye(message, client, target)
+    if has_eye:
+        curse_eye_note = await _settle_curse_eye(message, client, original_target)
+        if scapegoat_note:
+            curse_eye_note += f"\n👁️ 借刀杀人可以转嫁普通诅咒，但无法反弹 **诅咒之眼** 的凝视！"
 
     cursed_users.add(target.id)
     await message.channel.send(
@@ -110,7 +128,8 @@ async def _settle_curse_eye(
 ) -> str:
     """诅咒之眼结算：目标额度重置为 0-1000 随机值，返回附加消息（不发送）。
 
-    由 handle_curse 在普通诅咒流程之后调用（叠加效果），不发送消息。"""
+    由 handle_curse 调用：诅咒他人时在普通诅咒流程之后叠加；诅咒自己时单独触发。
+    效果无法被借刀杀人反弹（调用前 target 已固定）。"""
     quota = await query_quota(client, target.name)
     if quota is None:
         return f"\n👁️ 诅咒之眼窥视 {target.mention} 失败（查询额度失败），效果落空。"
