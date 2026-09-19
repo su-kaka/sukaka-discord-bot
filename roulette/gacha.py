@@ -742,7 +742,7 @@ async def _settle_error(message: discord.Message, client: httpx.AsyncClient) -> 
 
 async def _settle_robinhood(message: discord.Message, client: httpx.AsyncClient) -> None:
     """劫富济贫：排名前十的用户随机分你他们额度的 1%-10%。"""
-    top_users = await _get_top_quota_excluded(message)
+    top_users = await _get_top_quota_excluded(message, client)
     if not top_users:
         await message.channel.send("🎴 劫富济贫失败：暂无排行数据。")
         return
@@ -810,7 +810,7 @@ class SelfDestructPacketView(PacketView):
 
 async def _settle_depositking(message: discord.Message, client: httpx.AsyncClient) -> None:
     """存为王：排行榜前十名用户自动存款一次（额度的 50% 存入银行）。"""
-    top_users = await _get_top_quota_excluded(message)
+    top_users = await _get_top_quota_excluded(message, client)
     if not top_users:
         await message.channel.send("🏦 存为王失败：暂无排行数据。")
         return
