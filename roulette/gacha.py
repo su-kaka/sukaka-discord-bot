@@ -39,6 +39,8 @@ from roulette.constants import (
     MARRY_MIN_FEE,
     OFFLINE_MIN_QUOTA,
     OFFLINE_RESET_QUOTA,
+    PACKET_TIMEOUT_SECONDS,
+    RED_PACKET_MAX_GRABBERS,
     YOURNAME_SWAP_SECONDS,
 )
 from roulette.packet_base import PacketView
@@ -802,8 +804,8 @@ class SelfDestructPacketView(PacketView):
             sender=sender,
             client=client,
             pool=pool,
-            max_grabbers=10,
-            timeout=60,
+            max_grabbers=RED_PACKET_MAX_GRABBERS,
+            timeout=PACKET_TIMEOUT_SECONDS,
             packet_type="selfdestruct",
         )
 

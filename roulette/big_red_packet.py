@@ -10,10 +10,10 @@ import httpx
 
 from roulette.constants import (
     BIG_RED_PACKET_INTERVAL_SECONDS,
-    BIG_RED_PACKET_MAX_GRABBERS,
     BIG_RED_PACKET_POOL,
-    BIG_RED_PACKET_TIMEOUT_SECONDS,
+    PACKET_TIMEOUT_SECONDS,
     QUOTA_CHANNEL_ID,
+    RED_PACKET_MAX_GRABBERS,
 )
 from roulette.packet_base import PacketView
 
@@ -29,8 +29,8 @@ class BigRedPacketView(PacketView):
             sender=None,
             client=client,
             pool=BIG_RED_PACKET_POOL,
-            max_grabbers=BIG_RED_PACKET_MAX_GRABBERS,
-            timeout=BIG_RED_PACKET_TIMEOUT_SECONDS,
+            max_grabbers=RED_PACKET_MAX_GRABBERS,
+            timeout=PACKET_TIMEOUT_SECONDS,
             packet_type="big",
         )
 

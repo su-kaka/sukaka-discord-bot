@@ -8,8 +8,8 @@ import discord
 import httpx
 
 from roulette.constants import (
+    PACKET_TIMEOUT_SECONDS,
     RED_PACKET_MAX_GRABBERS,
-    RED_PACKET_TIMEOUT_SECONDS,
 )
 from roulette.packet_base import PacketView
 
@@ -30,7 +30,7 @@ class RedPacketView(PacketView):
             client=client,
             pool=pool,
             max_grabbers=RED_PACKET_MAX_GRABBERS,
-            timeout=RED_PACKET_TIMEOUT_SECONDS,
+            timeout=PACKET_TIMEOUT_SECONDS,
             packet_type="user",
             cost=cost,
             on_finish=on_finish,
