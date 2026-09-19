@@ -79,7 +79,7 @@ CARD_POOL: dict[str, tuple[str, str, int]] = {
     "offline": ("下线", f"【特殊道具】额度超过 {OFFLINE_MIN_QUOTA} 才能使用：额度重置为 {OFFLINE_RESET_QUOTA}，银行存款清空，无法被任何操作选择、无法抢红包、无法发言掉落额度，下次任意发言解除下线状态", 5),
     "wishingpool": ("许愿池", f"从列表中任选一张道具卡（含即时生效卡），{GACHA_WISHING_TIMEOUT_SECONDS} 秒内未选视为放弃", 5),
     "collector": ("收藏家", "抽卡得到的背包道具可叠加次数：重复抽到相同道具时次数 +1（无收藏家时重复抽到不叠加，但保留已有数量不会重置）（唯一道具，直到下一个人抽到）", 5),
-    "curseeye": ("诅咒之眼", f"持有期间发送 `诅咒 @某人`（可以诅咒自己）叠加使用诅咒之眼：目标额度重置为 {CURSE_EYE_QUOTA_MIN}-{CURSE_EYE_QUOTA_MAX} 之间的随机值，无法被借刀杀人反弹，每次使用有 {round(CURSE_EYE_DESTROY_CHANCE*100, 2)}% 概率销毁（唯一道具，直到下一个人抽到）", 5),
+    "curseeye": ("诅咒之眼", f"持有期间发送 `诅咒 @某人`（可以诅咒自己）叠加使用诅咒之眼且无视诅咒冷却：目标额度重置为 {CURSE_EYE_QUOTA_MIN}-{CURSE_EYE_QUOTA_MAX} 之间的随机值，无法被借刀杀人反弹，每次使用有 {round(CURSE_EYE_DESTROY_CHANCE*100, 2)}% 概率销毁（唯一道具，直到下一个人抽到）", 5),
     "divinity": ("神性", f"抽到即解除身上的诅咒，解锁 `祝福 @某人` 能力：被祝福者梭哈成功率提高到 75%（无法和一念天堂叠加，一念天堂会覆盖祝福），每次祝福有 {round(DIVINITY_EXHAUST_CHANCE*100, 2)}% 概率神力耗尽（唯一道具，直到下一个人抽到）", 5),
     "blank": ("空白", "无效果", 40),  # 实际概率由 GACHA_BLANK_CHANCE 控制
 }
@@ -1525,6 +1525,8 @@ class WishPoolView(discord.ui.View):
     """许愿池视图：从卡池列表中任选一张道具卡。
 
     即时生效卡（含唯一道具）选择后立即结算；持续型卡牌放入背包。
+    选项按「立即生效」/「背包道具」拆成两个下拉菜单：
+    Discord 限制单个下拉菜单最多 25 个选项，全部塞进一个会被 400 拒绝。
     60 秒内未选择视为放弃。
     """
 
@@ -1536,15 +1538,28 @@ class WishPoolView(discord.ui.View):
         self.message: Optional[discord.Message] = None
         self.selected = False
 
-        options = []
+        instant_options: list[discord.SelectOption] = []
+        bag_options: list[discord.SelectOption] = []
         for key, (card_name, card_desc, _) in CARD_POOL.items():
             if key in WISHING_EXCLUDED_CARDS:
                 continue
-            suffix = "（立即生效）" if key in INSTANT_SETTLE_CARDS or key in UNIQUE_CARDS else ""
-            options.append(
-                discord.SelectOption(label=card_name, value=key, description=(card_desc + suffix)[:100])
-            )
-        self.select_menu.options = options
+            option = discord.SelectOption(label=card_name, value=key, description=card_desc[:100])
+            if key in INSTANT_SETTLE_CARDS or key in UNIQUE_CARDS:
+                instant_options.append(option)
+            else:
+                bag_options.append(option)
+
+        # Discord 硬性限制：每个下拉菜单 1-25 个选项，超限截断、为空移除
+        instant_options = instant_options[:25]
+        bag_options = bag_options[:25]
+        if instant_options:
+            self.select_instant.options = instant_options
+        else:
+            self.remove_item(self.select_instant)
+        if bag_options:
+            self.select_bag.options = bag_options
+        else:
+            self.remove_item(self.select_bag)
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.user_id:
@@ -1552,12 +1567,19 @@ class WishPoolView(discord.ui.View):
             return False
         return True
 
-    @discord.ui.select(placeholder="🌠 选择一张你想要的道具卡……")
-    async def select_menu(self, interaction: discord.Interaction, select: discord.ui.Select) -> None:
-        card_key = select.values[0]
+    @discord.ui.select(placeholder="⚡ 立即生效卡（含唯一道具）……", row=0)
+    async def select_instant(self, interaction: discord.Interaction, select: discord.ui.Select) -> None:
+        await self._pick_card(interaction, select.values[0])
+
+    @discord.ui.select(placeholder="🎒 背包道具卡……", row=1)
+    async def select_bag(self, interaction: discord.Interaction, select: discord.ui.Select) -> None:
+        await self._pick_card(interaction, select.values[0])
+
+    async def _pick_card(self, interaction: discord.Interaction, card_key: str) -> None:
         name, desc, _ = CARD_POOL[card_key]
         self.selected = True
-        self.select_menu.disabled = True
+        self.select_instant.disabled = True
+        self.select_bag.disabled = True
 
         # 即时生效卡：结算函数自己发送结果消息
         if card_key in INSTANT_SETTLE_CARDS:
@@ -1623,7 +1645,10 @@ class WishPoolView(discord.ui.View):
             item.disabled = True  # type: ignore[attr-defined]
         try:
             if self.message:
-                await self.message.edit(content="🌠 ⏳ 60 秒内未选择，许愿池机会已放弃。", view=self)
+                await self.message.edit(
+                    content=f"🌠 ⏳ {GACHA_WISHING_TIMEOUT_SECONDS} 秒内未选择，许愿池机会已放弃。",
+                    view=self,
+                )
         except discord.HTTPException:
             pass
 

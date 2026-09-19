@@ -67,12 +67,14 @@ async def handle_curse(
         )
         return
 
-    now = time.monotonic()
-    cooldown_until = curse_cooldowns.get(message.author.id, 0.0)
-    if now < cooldown_until:
-        remaining = int(cooldown_until - now) + 1
-        await message.channel.send(f"🔮 诅咒冷却中，请等待 {remaining} 秒后再试。")
-        return
+    # 持有诅咒之眼时无视诅咒冷却
+    if not has_eye:
+        now = time.monotonic()
+        cooldown_until = curse_cooldowns.get(message.author.id, 0.0)
+        if now < cooldown_until:
+            remaining = int(cooldown_until - now) + 1
+            await message.channel.send(f"🔮 诅咒冷却中，请等待 {remaining} 秒后再试。")
+            return
 
     quota = await query_quota(client, message.author.name)
     if quota is None:
@@ -89,7 +91,9 @@ async def handle_curse(
         await message.channel.send("🔮 扣除额度失败，请稍后再试。")
         return
 
-    curse_cooldowns[message.author.id] = now + CURSE_COOLDOWN_SECONDS
+    # 持有诅咒之眼时不写入冷却（下次仍可立即诅咒）
+    if not has_eye:
+        curse_cooldowns[message.author.id] = time.monotonic() + CURSE_COOLDOWN_SECONDS
 
     # 借刀杀人：被诅咒时随机转嫁给别人（从银行存款用户中选）
     # 诅咒之眼无法被借刀杀人反弹：始终命中最初目标，先固定原始目标
