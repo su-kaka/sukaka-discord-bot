@@ -48,7 +48,7 @@ DB_PATH = Path(os.getenv("GACHA_DB", GACHA_DB))
 # 卡牌定义：key -> (名称, 描述, 权重)
 CARD_POOL: dict[str, tuple[str, str, int]] = {
     "heaven": ("一念天堂", "下次梭哈成功概率提升到 75%，成功翻三倍", 5),
-    "lucky": ("幸运儿", "下次抢任意红包必定最大", 10),
+    "lucky": ("幸运儿", "下次抢任意红包并列抢到最大份", 10),
     "madman": ("狂徒", "下次抢劫必定成功，抢劫 CD 缩短到 10 秒", 10),
     "weak": ("虚弱", "下次被抢劫必定被抢成功", 10),
     "seduce": ("诱惑", "强制和某人结婚（50% 概率失败）", 10),
@@ -790,7 +790,7 @@ async def _settle_robinhood(message: discord.Message, client: httpx.AsyncClient)
 
 
 class SelfDestructPacketView(PacketView):
-    """自爆红包：自爆者额度归零，奖池随机分给抢红包的人。"""
+    """自爆红包：自爆者额度归零，奖池随机分给所有参与的人。"""
 
     def __init__(
         self,
@@ -805,7 +805,6 @@ class SelfDestructPacketView(PacketView):
             max_grabbers=10,
             timeout=60,
             packet_type="selfdestruct",
-            split_mode="all",
         )
 
 

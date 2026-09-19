@@ -8,26 +8,23 @@ from roulette.constants import BIG_RED_PACKET_OPTIONS_COUNT
 
 
 def split_random(pool: int, count: int) -> list[int]:
-    """把 pool 点随机分成 count 份，每份至少 1 点。"""
+    """把 pool 点随机分成 count 份，总和正好等于 pool。
+
+    pool 足够时每份至少 1 点；pool 不足 count 时只有 pool 份各得 1 点，其余为 0。
+    """
     if count <= 0:
         return []
+    if pool < count:
+        shares = [0] * count
+        for i in random.sample(range(count), pool):
+            shares[i] = 1
+        return shares
     if count == 1:
         return [pool]
     cuts = sorted(random.sample(range(1, pool), count - 1))
     parts = [b - a for a, b in zip([0] + cuts, cuts + [pool])]
     random.shuffle(parts)
     return parts
-
-
-def split_random_capped(pool: int, count: int, cap: int) -> list[int]:
-    """把 pool 点随机分成 count 份，每份 0-cap 点，总和不超过 pool。"""
-    if count <= 0 or pool <= 0:
-        return []
-    amounts = [random.randint(0, cap) for _ in range(count)]
-    total = sum(amounts)
-    if total > pool:
-        amounts = [a * pool // total for a in amounts]
-    return amounts
 
 
 def make_arithmetic_question() -> tuple[str, int, list[int]]:

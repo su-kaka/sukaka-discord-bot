@@ -1,4 +1,4 @@
-"""通用红包视图：支持人机验证、多种分配模式、多种红包类型。"""
+"""通用红包视图：支持人机验证、多种红包类型，全员随机分完整池。"""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ import discord
 import httpx
 
 from roulette.api import adjust_quota
-from roulette.utils import make_arithmetic_question, split_random, split_random_capped
+from roulette.utils import make_arithmetic_question, split_random
 
 
 class PacketView(discord.ui.View):
@@ -24,9 +24,6 @@ class PacketView(discord.ui.View):
         max_grabbers: 最大参与人数。
         timeout: 超时秒数。
         packet_type: 红包类型标识（"user" / "big" / "selfdestruct"）。
-        split_mode: 分配模式（"winners" 少数幸运儿 / "all" 全员随机）。
-        max_winners: split_mode="winners" 时的幸运儿数量。
-        max_share: split_mode="all" 时的单人上限。
         cost: 发送者成本（无人参与时退回，None 表示不退）。
         on_finish: 结束回调。
     """
@@ -39,9 +36,6 @@ class PacketView(discord.ui.View):
         max_grabbers: int,
         timeout: int,
         packet_type: str,
-        split_mode: str,
-        max_winners: Optional[int] = None,
-        max_share: Optional[int] = None,
         cost: Optional[int] = None,
         on_finish: Optional[Callable[[], None]] = None,
     ) -> None:
@@ -51,9 +45,6 @@ class PacketView(discord.ui.View):
         self.pool = pool
         self.max_grabbers = max_grabbers
         self.packet_type = packet_type
-        self.split_mode = split_mode
-        self.max_winners = max_winners
-        self.max_share = max_share
         self.cost = cost
         self._on_finish = on_finish
 
@@ -61,6 +52,7 @@ class PacketView(discord.ui.View):
         self.completed = False
         self.grabbers: list[discord.Member | discord.User] = []
         self.failed_users: set[int] = set()
+        self._start_time = time.monotonic()  # 视图创建时间，用于计算剩余超时
         self._last_edit_time = 0.0  # 上次编辑时间，用于限流
         self.question, self.answer, options = make_arithmetic_question()
         for value in options:
@@ -90,16 +82,16 @@ class PacketView(discord.ui.View):
         names = "、".join(u.mention for u in self.grabbers) or "暂无"
         if self.packet_type == "big":
             title = "🧧🧧 **机器人大红包**！"
-            rule = f"每人随机抢 0-{self.max_share} 点，手快有手慢无！"
+            rule = "奖池随机分给所有参与的人，人满立即开奖！"
         elif self.packet_type == "selfdestruct":
             title = f"💥 {self.sender.mention} 自爆了一个红包！"
-            rule = "奖池随机分给抢红包的人，手快有手慢无！"
+            rule = "奖池随机分给所有参与的人，人满立即开奖！"
         else:
             title = f"🧧 {self.sender.mention} 发了一个红包！"
             fee = (self.cost or self.pool) - self.pool
             rule = (
-                f"{self.pool} 点随机分给最多 {self.max_winners} 个幸运儿"
-                f"（红包 {self.cost} 点，{fee} 点销毁），其余人抢 0 点！"
+                f"{self.pool} 点随机分给所有参与的人"
+                f"（红包 {self.cost} 点，{fee} 点销毁），人满立即开奖！"
             )
 
         return (
@@ -168,7 +160,13 @@ class PacketView(discord.ui.View):
             if now - self._last_edit_time >= 1.0:
                 self._last_edit_time = now
                 try:
+                    # 编辑后重新注册 view 会重置超时计时器，先记下剩余时间再恢复
+                    remaining = max(self.timeout - (now - self._start_time), 0.0)
                     await self.message.edit(content=self._packet_text(), view=self)
+                    if remaining <= 0:
+                        await self._settle()
+                    else:
+                        self.timeout = remaining
                 except (discord.NotFound, discord.HTTPException):
                     pass
 
@@ -178,7 +176,6 @@ class PacketView(discord.ui.View):
         if self.completed:
             return
         self.completed = True
-        self.stop()
         self._finish()
         for item in self.children:
             item.disabled = True  # type: ignore[union-attr]
@@ -188,40 +185,31 @@ class PacketView(discord.ui.View):
             await self._handle_empty()
             return
 
-        # 计算份额
+        # 全员随机分完整池
+        shares = split_random(self.pool, count)
+        # 幸运儿生效：所有触发效果的幸运儿并列最大（延迟导入避免循环依赖）
+        from roulette.gacha import consume_effect
+
+        lucky_users = [u for u in self.grabbers if consume_effect(u.id, "lucky")]
         lucky_note = ""
-        if self.split_mode == "winners":
-            winner_count = min(self.max_winners or 1, count)
-            winners = random.sample(self.grabbers, winner_count)
-            shares = split_random(self.pool, winner_count)
-            results_map = dict(zip(winners, shares))
-            for user in self.grabbers:
-                if user not in results_map:
-                    results_map[user] = 0
-            # 幸运儿生效：下次抢红包必定最大（延迟导入避免循环依赖）
-            from roulette.gacha import consume_effect
-
-            for user in self.grabbers:
-                if consume_effect(user.id, "lucky"):
-                    max_idx = max(results_map, key=results_map.get)
-                    if results_map[user] < results_map[max_idx]:
-                        results_map[user], results_map[max_idx] = results_map[max_idx], results_map[user]
-                        lucky_note = f"\n🃏 幸运儿生效！{user.mention} 必定抢到最大份！"
-                    break
-            ordered_results = [(user, results_map[user]) for user in self.grabbers]
-        else:
-            shares = split_random_capped(self.pool, count, self.max_share or self.pool)
-            # 幸运儿生效：下次抢红包必定最大（延迟导入避免循环依赖）
-            from roulette.gacha import consume_effect
-
-            for user in self.grabbers:
-                if consume_effect(user.id, "lucky"):
-                    max_idx = shares.index(max(shares))
-                    user_idx = self.grabbers.index(user)
-                    shares[user_idx], shares[max_idx] = shares[max_idx], shares[user_idx]
-                    lucky_note = f"\n🃏 幸运儿生效！{user.mention} 必定抢到最大份！"
-                    break
-            ordered_results = list(zip(self.grabbers, shares))
+        if lucky_users:
+            # 把前 N 大的份额全部给幸运儿，其余人分剩下的
+            order = sorted(range(count), key=lambda i: shares[i], reverse=True)
+            top_vals = [shares[i] for i in order[:len(lucky_users)]]
+            rest_vals = [shares[i] for i in order[len(lucky_users):]]
+            lucky_set = {u.id for u in lucky_users}
+            ti = ri = 0
+            for i, u in enumerate(self.grabbers):
+                if u.id in lucky_set:
+                    shares[i] = top_vals[ti]
+                    ti += 1
+                else:
+                    shares[i] = rest_vals[ri]
+                    ri += 1
+            lucky_note = (
+                f"\n🃏 幸运儿生效！{'、'.join(u.mention for u in lucky_users)} 并列抢到最大份！"
+            )
+        ordered_results = list(zip(self.grabbers, shares))
 
         # 并发发放额度
         async def _grant(user: discord.Member | discord.User, amount: int) -> Optional[int]:
@@ -250,10 +238,9 @@ class PacketView(discord.ui.View):
                 f"（{count} 人参与，奖池 {self.pool} 点）"
             )
         else:
-            winner_count = sum(1 for _, amount, _ in results if amount > 0)
             header = (
                 f"🧧 {self.sender.mention} 的红包开奖！"
-                f"（{count} 人参与，{winner_count} 人中奖，奖池 {self.pool} 点）"
+                f"（{count} 人参与，奖池 {self.pool} 点）"
             )
 
         lines = [header]
@@ -267,6 +254,9 @@ class PacketView(discord.ui.View):
 
         if self.message:
             try:
+                # 先 stop() 再编辑：stop 后 is_finished() 为 True，
+                # message.edit 不会重新注册 view，超时计时器也不会重启
+                self.stop()
                 await self.message.edit(content="\n".join(lines), view=None)
             except (discord.NotFound, discord.HTTPException):
                 pass
@@ -283,6 +273,7 @@ class PacketView(discord.ui.View):
 
         if self.message:
             try:
+                self.stop()
                 await self.message.edit(content=text, view=None)
             except (discord.NotFound, discord.HTTPException):
                 pass
