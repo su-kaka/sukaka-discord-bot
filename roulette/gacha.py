@@ -176,15 +176,6 @@ def _init_db() -> None:
             )
             """
         )
-        # 一次性迁移：历史版本把祝福写进了背包表（不在 CARD_POOL，显示为原始 key），迁到 buff 表
-        migrated = conn.execute(
-            """
-            INSERT OR IGNORE INTO active_buffs (discord_id, buff_key, created_at)
-            SELECT discord_id, 'bless', created_at FROM gacha_effects WHERE card_key = 'bless'
-            """
-        ).rowcount
-        if migrated:
-            conn.execute("DELETE FROM gacha_effects WHERE card_key = 'bless'")
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS body_swaps (
