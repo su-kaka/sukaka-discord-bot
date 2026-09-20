@@ -194,21 +194,6 @@ def _init_db() -> None:
             )
             """
         )
-        # 迁移：旧版「虚弱」是背包卡牌（gacha_effects），新版改为状态 buff，存量数据搬到 active_buffs
-        legacy_weak = conn.execute(
-            "SELECT discord_id FROM gacha_effects WHERE card_key = 'weak'"
-        ).fetchall()
-        if legacy_weak:
-            for (discord_id,) in legacy_weak:
-                conn.execute(
-                    """
-                    INSERT INTO active_buffs (discord_id, buff_key, created_at)
-                    VALUES (?, 'weak', ?)
-                    ON CONFLICT(discord_id, buff_key) DO NOTHING
-                    """,
-                    (discord_id, time.time()),
-                )
-            conn.execute("DELETE FROM gacha_effects WHERE card_key = 'weak'")
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS body_swaps (

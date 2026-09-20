@@ -71,7 +71,7 @@ start_roulette(bot)
 - **诅咒之眼**（`curse.py` 的 `_settle_curse_eye`）：持有者发送 `诅咒 @某人` 时**在普通诅咒流程（押 10 点、必输 debuff）正常结算之后额外叠加**——目标额度重置为 `CURSE_EYE_QUOTA_MIN`-`CURSE_EYE_QUOTA_MAX`（0-1000）随机值，每次使用 `CURSE_EYE_DESTROY_CHANCE`（44.44%）概率销毁（`clear_curse_eye_holder`）。效果**无法被借刀杀人反弹**（借刀杀人只转嫁普通诅咒）；持有者**无视诅咒冷却**（不检查也不写入 `curse_cooldowns`），可发送 `诅咒 @自己`（不押点，仅诅咒之眼效果，不入诅咒名单）。普通诅咒逻辑不变，未持有者无此效果。
 - 身体交换（你的名字卡）存 `body_swaps` 表，`restore_body_swaps` 后台任务在 5 分钟后换回。
 - **循环依赖规避惯例**：`packet_base.py`、`quota_drop.py` 等在函数体内延迟 `from roulette.gacha import ...`，因为 gacha 又 import 了 packet_base。新增跨模块引用时沿用此惯例。
-- 立即结算型卡牌（劫富济贫/自爆/错误/通货膨胀/存为王/变卖家产/虚弱）不写 `gacha_effects`，抽到即触发。**虚弱**抽中立即附加 `weak` 状态 buff（存 `active_buffs` 表；旧版为背包卡牌，`_init_db` 启动时把存量记录迁移过去），`rob.py` 用 `remove_buff(target, "weak")` 消耗：被抢劫必定被抢成功。变卖家产**从背包随机选出若干种道具，每种卖掉全部持有数量**（唯一道具卖掉后清除持有记录），按 `GACHA_SELLOUT_PRICE`（100 点/张）发放额度。
+- 立即结算型卡牌（劫富济贫/自爆/错误/通货膨胀/存为王/变卖家产/虚弱）不写 `gacha_effects`，抽到即触发。**虚弱**抽中立即附加 `weak` 状态 buff（存 `active_buffs` 表），`rob.py` 用 `remove_buff(target, "weak")` 消耗：被抢劫必定被抢成功。变卖家产**从背包随机选出若干种道具，每种卖掉全部持有数量**（唯一道具卖掉后清除持有记录），按 `GACHA_SELLOUT_PRICE`（100 点/张）发放额度。
 
 ## 通用红包视图（packet_base.py）
 
