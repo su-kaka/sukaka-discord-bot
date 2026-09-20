@@ -104,11 +104,11 @@ async def handle_rob(
         await message.channel.send(
             f"🃏 狂徒生效！{message.author.mention} 的抢劫必定成功！{scapegoat_note}"
         )
-    # 虚弱生效：被抢劫必定成功
-    elif consume_effect(target.id, "weak"):
+    # 虚弱生效：被抢劫必定成功（虚弱为状态 buff，存 active_buffs 表）
+    elif remove_buff(target.id, "weak"):
         success = True
         await message.channel.send(
-            f"🃏 虚弱生效！{target.mention} 无法抵抗抢劫！{scapegoat_note}"
+            f"🤒 虚弱生效！{target.mention} 无法抵抗抢劫！{scapegoat_note}"
         )
     else:
         success = random.random() < 0.5

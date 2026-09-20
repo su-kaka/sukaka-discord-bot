@@ -92,17 +92,18 @@ CARD_POOL: dict[str, tuple[str, str, int]] = {
 
 # 许愿池可选范围：空白与许愿池本身不可选
 WISHING_EXCLUDED_CARDS = {"blank", "wishingpool"}
-# 抽中即结算的卡牌（选择后立即触发，不进背包）
-INSTANT_SETTLE_CARDS = {"robinhood", "selfdestruct", "error", "inflation", "depositking", "sellout"}
+# 抽中即结算的卡牌（选择后立即触发，不进背包）；虚弱抽中即附加为状态 buff
+INSTANT_SETTLE_CARDS = {"robinhood", "selfdestruct", "error", "inflation", "depositking", "sellout", "weak"}
 # 唯一道具卡牌（选择后立即替换持有者，不进背包）
 UNIQUE_CARDS = {"snake", "membership", "meteor", "collector", "curseeye", "divinity", "d6"}
 # 背包道具卡牌集合（D6 重置背包道具时的候选范围：卡池去掉唯一道具/即时结算卡/空白与许愿池）
 BAG_CARDS = set(CARD_POOL) - UNIQUE_CARDS - INSTANT_SETTLE_CARDS - WISHING_EXCLUDED_CARDS
 
-# 状态 buff 定义（诅咒/祝福，不进背包，存 active_buffs 表）：key -> (名称, 描述)
+# 状态 buff 定义（诅咒/祝福/虚弱，不进背包，存 active_buffs 表）：key -> (名称, 描述)
 BUFF_POOL: dict[str, tuple[str, str]] = {
     "curse": ("诅咒", "下次抢劫必被反杀、决斗必输、梭哈必输，生效一次后解除"),
     "bless": ("祝福", "梭哈成功率提高到 75%（不与一念天堂叠加，一念天堂覆盖时保留）"),
+    "weak": ("虚弱", "下次被抢劫必定被抢成功，生效一次后解除"),
 }
 
 
@@ -193,6 +194,21 @@ def _init_db() -> None:
             )
             """
         )
+        # 迁移：旧版「虚弱」是背包卡牌（gacha_effects），新版改为状态 buff，存量数据搬到 active_buffs
+        legacy_weak = conn.execute(
+            "SELECT discord_id FROM gacha_effects WHERE card_key = 'weak'"
+        ).fetchall()
+        if legacy_weak:
+            for (discord_id,) in legacy_weak:
+                conn.execute(
+                    """
+                    INSERT INTO active_buffs (discord_id, buff_key, created_at)
+                    VALUES (?, 'weak', ?)
+                    ON CONFLICT(discord_id, buff_key) DO NOTHING
+                    """,
+                    (discord_id, time.time()),
+                )
+            conn.execute("DELETE FROM gacha_effects WHERE card_key = 'weak'")
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS body_swaps (
@@ -879,6 +895,11 @@ async def handle_gacha(
         await _settle_sellout(message, client)
         return
 
+    # 虚弱：立即附加为状态 buff，不进背包
+    if card_key == "weak":
+        await _settle_weak(message)
+        return
+
     # 背包道具：持有收藏家时叠加次数，否则保留已有数量不重置
     remaining, stacked = _add_effect_on_draw(message.author.id, card_key)
     if stacked:
@@ -983,6 +1004,11 @@ async def _handle_multidraw(
             await _settle_sellout(message, client)
             continue
 
+        if card_key == "weak":
+            add_buff(message.author.id, "weak")
+            lines.append(f"{i+1}. 🤒 **{name}**！{desc}（已附加为身上状态）")
+            continue
+
         remaining, stacked = _add_effect_on_draw(message.author.id, card_key)
         if stacked:
             stack_note = f"（收藏家生效，叠加至 ×{remaining}）"
@@ -1018,6 +1044,16 @@ async def _get_top_quota_excluded(
 ) -> Optional[list[tuple[str, int]]]:
     """查询排行榜，服务端排除蛇符咒持有者和下线用户（不占用前十名额）。"""
     return await query_top_quota(client, _get_exclude_names(message))
+
+
+async def _settle_weak(message: discord.Message) -> None:
+    """虚弱：立即附加虚弱状态 buff（下次被抢劫必定被抢成功），不进背包。"""
+    add_buff(message.author.id, "weak")
+    name, desc, _ = CARD_POOL["weak"]
+    await message.channel.send(
+        f"🤒 {message.author.mention} 抽中 **{name}**！{desc}\n"
+        f"🌀 虚弱已附加为身上状态（不可被偷取/变卖/交换），用 `我的卡牌` 查看。"
+    )
 
 
 async def _settle_error(message: discord.Message, client: httpx.AsyncClient) -> None:
@@ -1796,6 +1832,8 @@ class WishPoolView(discord.ui.View):
                 await _settle_depositking(self.message_obj, self.client)
             elif card_key == "sellout":
                 await _settle_sellout(self.message_obj, self.client)
+            elif card_key == "weak":
+                await _settle_weak(self.message_obj)
         # 唯一道具：立即替换持有者
         elif card_key in UNIQUE_CARDS:
             setter, getter = UNIQUE_HOLDER_ACCESSORS[card_key][:2]
