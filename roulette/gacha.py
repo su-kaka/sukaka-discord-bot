@@ -38,6 +38,8 @@ from roulette.constants import (
     CURSE_EYE_DESTROY_CHANCE,
     CURSE_EYE_QUOTA_MIN,
     CURSE_EYE_QUOTA_MAX,
+    D6_KEYWORD,
+    D6_RECHARGE_COST,
     DIVINITY_EXHAUST_CHANCE,
     MARRY_FEE_PERCENT,
     MARRY_MIN_FEE,
@@ -45,6 +47,7 @@ from roulette.constants import (
     OFFLINE_MIN_QUOTA,
     OFFLINE_RESET_QUOTA,
     PACKET_TIMEOUT_SECONDS,
+    QUOTA_DROP_KEYWORD,
     RED_PACKET_MAX_GRABBERS,
     YOURNAME_SWAP_SECONDS,
 )
@@ -65,7 +68,7 @@ CARD_POOL: dict[str, tuple[str, str, int]] = {
     "selfdestruct": ("自爆", f"额度归零，随机销毁 {GACHA_SELFDESTRUCT_MIN_PERCENT}%-{GACHA_SELFDESTRUCT_MAX_PERCENT}%，剩余生成红包供所有人抢", 10),
     "snake": ("蛇符咒", "排行榜隐身，不会被劫富济贫，效果永久（唯一道具，直到下一个人抽到）", 5),
     "membership": ("会员卡", "抽卡费用减半、抽卡 CD 减半，效果永久（唯一道具，直到下一个人抽到）", 5),
-    "meteor": ("流星雨", f"发言掉落无冷却且必定掉落额度，每次掉落后有 {round(METEOR_DISSIPATE_CHANCE*100, 2)}% 概率星光消散（唯一道具，直到星光消散或下一个人抽到）", 5),
+    "meteor": ("流星雨", f"发送「{QUOTA_DROP_KEYWORD}」掉落无冷却且必定掉落额度，每次掉落后有 {round(METEOR_DISSIPATE_CHANCE*100, 2)}% 概率星光消散（唯一道具，直到星光消散或下一个人抽到）", 5),
     "provoke": ("挑衅", "下次发起决斗时对方无法拒绝，决斗立即自动结算", 10),
     "error": ("错误", f"额度重置为 {GACHA_ERROR_MIN}-{GACHA_ERROR_MAX} 之间的随机值", 5),
     "retry": ("这把不算", "梭哈或决斗失败后可重来一次", 10),
@@ -76,12 +79,13 @@ CARD_POOL: dict[str, tuple[str, str, int]] = {
     "yourname": ("你的名字", "【超稀有道具】使用 `你的名字@某人` 和某人交换身体：双方交换所有额度/卡牌/银行存款，5 分钟后换回，期间双方不能再被你的名字影响", 1),
     "inflation": ("通货膨胀", "若银行存在存款 > 3000 点的用户，所有人存款数值减半", 5),
     "depositking": ("存为王", "排行榜前十名用户自动存款一次（额度的 50% 存入银行）", 5),
-    "sellout": ("变卖家产", f"随机卖掉若干种道具的全部数量（含蛇符咒/会员卡/流星雨/收藏家/诅咒之眼/神性），每张 {GACHA_SELLOUT_PRICE} 点额度", 10),
-    "offline": ("下线", f"【特殊道具】额度超过 {OFFLINE_MIN_QUOTA} 才能使用：额度重置为 {OFFLINE_RESET_QUOTA}，银行存款清空，无法被任何操作选择、无法抢红包、无法发言掉落额度，下次任意发言解除下线状态", 5),
+    "sellout": ("变卖家产", f"随机卖掉若干种道具的全部数量（含蛇符咒/会员卡/流星雨/收藏家/诅咒之眼/神性/D6），每张 {GACHA_SELLOUT_PRICE} 点额度", 10),
+    "offline": ("下线", f"【特殊道具】额度超过 {OFFLINE_MIN_QUOTA} 才能使用：额度重置为 {OFFLINE_RESET_QUOTA}，银行存款清空，无法被任何操作选择、无法抢红包、无法通过「{QUOTA_DROP_KEYWORD}」掉落额度，下次任意发言解除下线状态", 5),
     "wishingpool": ("许愿池", f"从三个栏目（唯一道具/即时生效卡/背包道具卡）中任选一张，{GACHA_WISHING_TIMEOUT_SECONDS} 秒内未选视为放弃", 5),
     "collector": ("收藏家", "抽卡得到的背包道具可叠加次数：重复抽到相同道具时次数 +1（无收藏家时重复抽到不叠加，但保留已有数量不会重置）（唯一道具，直到下一个人抽到）", 5),
     "curseeye": ("诅咒之眼", f"持有期间发送 `诅咒 @某人`（可以诅咒自己）叠加使用诅咒之眼且无视诅咒冷却：目标额度重置为 {CURSE_EYE_QUOTA_MIN}-{CURSE_EYE_QUOTA_MAX} 之间的随机值，无法被借刀杀人反弹，每次使用有 {round(CURSE_EYE_DESTROY_CHANCE*100, 2)}% 概率销毁（唯一道具，直到下一个人抽到）", 5),
     "divinity": ("神性", f"抽到即解除身上的诅咒，解锁 `祝福 @某人` 能力：被祝福者梭哈成功率提高到 75%（无法和一念天堂叠加，一念天堂会覆盖祝福），每次祝福有 {round(DIVINITY_EXHAUST_CHANCE*100, 2)}% 概率神力耗尽（唯一道具，直到下一个人抽到）", 5),
+    "d6": ("D6", f"发送「{D6_KEYWORD}」掷骰重置身上的道具：数量不变、种类改变（唯一道具重置为其他唯一道具、背包道具重置为其他背包道具），每次使用需 {D6_RECHARGE_COST} 点充能，D6 自身不受影响（唯一道具，直到下一个人抽到）", 5),
     "blank": ("空白", "无效果", 40),  # 实际概率由 GACHA_BLANK_CHANCE 控制
 }
 
@@ -90,7 +94,9 @@ WISHING_EXCLUDED_CARDS = {"blank", "wishingpool"}
 # 抽中即结算的卡牌（选择后立即触发，不进背包）
 INSTANT_SETTLE_CARDS = {"robinhood", "selfdestruct", "error", "inflation", "depositking", "sellout"}
 # 唯一道具卡牌（选择后立即替换持有者，不进背包）
-UNIQUE_CARDS = {"snake", "membership", "meteor", "collector", "curseeye", "divinity"}
+UNIQUE_CARDS = {"snake", "membership", "meteor", "collector", "curseeye", "divinity", "d6"}
+# 背包道具卡牌集合（D6 重置背包道具时的候选范围：卡池去掉唯一道具/即时结算卡/空白与许愿池）
+BAG_CARDS = set(CARD_POOL) - UNIQUE_CARDS - INSTANT_SETTLE_CARDS - WISHING_EXCLUDED_CARDS
 
 # 状态 buff 定义（诅咒/祝福，不进背包，存 active_buffs 表）：key -> (名称, 描述)
 BUFF_POOL: dict[str, tuple[str, str]] = {
@@ -161,6 +167,15 @@ def _init_db() -> None:
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS divinity_holder (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                discord_id INTEGER NOT NULL,
+                created_at REAL NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS d6_holder (
                 id INTEGER PRIMARY KEY CHECK (id = 1),
                 discord_id INTEGER NOT NULL,
                 created_at REAL NOT NULL
@@ -433,6 +448,45 @@ def clear_divinity_holder() -> None:
         conn.execute("DELETE FROM divinity_holder WHERE id = 1")
 
 
+def set_d6_holder(discord_id: int) -> None:
+    """设置 D6 唯一持有者（覆盖旧持有者）。"""
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute(
+            """
+            INSERT INTO d6_holder (id, discord_id, created_at)
+            VALUES (1, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                discord_id = excluded.discord_id,
+                created_at = excluded.created_at
+            """,
+            (discord_id, time.time()),
+        )
+
+
+def get_d6_holder() -> Optional[int]:
+    """查询当前 D6 持有者，无持有者返回 None。"""
+    with sqlite3.connect(DB_PATH) as conn:
+        row = conn.execute("SELECT discord_id FROM d6_holder WHERE id = 1").fetchone()
+    return row[0] if row else None
+
+
+def has_d6(discord_id: int) -> bool:
+    """是否持有 D6（唯一道具）。"""
+    return get_d6_holder() == discord_id
+
+
+# 唯一道具持有者存取映射：card_key -> (setter, getter, has, 表名)
+UNIQUE_HOLDER_ACCESSORS = {
+    "snake": (set_snake_charm_holder, get_snake_charm_holder, has_snake_charm, "snake_charm_holder"),
+    "membership": (set_membership_card_holder, get_membership_card_holder, has_membership_card, "membership_card_holder"),
+    "meteor": (set_meteor_shower_holder, get_meteor_shower_holder, has_meteor_shower, "meteor_shower_holder"),
+    "collector": (set_collector_card_holder, get_collector_card_holder, has_collector, "collector_card_holder"),
+    "curseeye": (set_curse_eye_holder, get_curse_eye_holder, has_curse_eye, "curse_eye_holder"),
+    "divinity": (set_divinity_holder, get_divinity_holder, has_divinity, "divinity_holder"),
+    "d6": (set_d6_holder, get_d6_holder, has_d6, "d6_holder"),
+}
+
+
 def add_buff(discord_id: int, buff_key: str) -> None:
     """添加状态 buff（诅咒/祝福），已存在则刷新时间。"""
     with sqlite3.connect(DB_PATH) as conn:
@@ -576,7 +630,7 @@ def get_user_cards(discord_id: int) -> list[tuple[str, int]]:
 
 
 def steal_random_card(robber_id: int, target_id: int) -> Optional[str]:
-    """抢劫成功时随机偷取对方身上一个道具（含蛇符咒、会员卡、流星雨），返回道具名称，无道具可偷返回 None。"""
+    """抢劫成功时随机偷取对方身上一个道具（含全部唯一道具），返回道具名称，无道具可偷返回 None。"""
     candidates = [card_key for card_key, _ in get_user_cards(target_id)]
     if has_snake_charm(target_id):
         candidates.append("snake")
@@ -590,6 +644,8 @@ def steal_random_card(robber_id: int, target_id: int) -> Optional[str]:
         candidates.append("curseeye")
     if has_divinity(target_id):
         candidates.append("divinity")
+    if has_d6(target_id):
+        candidates.append("d6")
     if not candidates:
         return None
     card_key = random.choice(candidates)
@@ -605,6 +661,8 @@ def steal_random_card(robber_id: int, target_id: int) -> Optional[str]:
         set_curse_eye_holder(robber_id)
     elif card_key == "divinity":
         set_divinity_holder(robber_id)
+    elif card_key == "d6":
+        set_d6_holder(robber_id)
     else:
         # 偷来的道具叠加到自己的背包（+1），不重置已有数量
         consume_effect(target_id, card_key)
@@ -731,7 +789,7 @@ async def handle_gacha(
         await message.channel.send(
             f"🎴 {message.author.mention} 消耗 {cost} 点抽卡……\n"
             f"☄️ **{name}**！{desc}。{transfer_note}\n"
-            f"🌠 每条发言必定掉落额度且无冷却，但星光随时可能消散！"
+            f"🌠 发送「{QUOTA_DROP_KEYWORD}」必定掉落额度且无冷却，但星光随时可能消散！"
         )
         return
 
@@ -772,6 +830,20 @@ async def handle_gacha(
         await message.channel.send(
             f"🎴 {message.author.mention} 消耗 {cost} 点抽卡……\n"
             f"✨ **{name}**！{desc}。{transfer_note}{purge_note}"
+        )
+        return
+
+    # D6：唯一道具，立即替换持有者
+    if card_key == "d6":
+        old_holder = get_d6_holder()
+        set_d6_holder(message.author.id)
+        transfer_note = ""
+        if old_holder and old_holder != message.author.id:
+            transfer_note = f"\n🎲 D6 已从 <@{old_holder}> 手中转移！"
+        await message.channel.send(
+            f"🎴 {message.author.mention} 消耗 {cost} 点抽卡……\n"
+            f"🎲 **{name}**！{desc}。{transfer_note}\n"
+            f"🎲 现在发送「{D6_KEYWORD}」即可掷骰重置身上的道具！"
         )
         return
 
@@ -881,6 +953,13 @@ async def _handle_multidraw(
             transfer_note = f"（从 <@{old_holder}> 手中转移）" if old_holder and old_holder != message.author.id else ""
             purge_note = "（诅咒已解除）" if remove_buff(message.author.id, "curse") else ""
             lines.append(f"{i+1}. ✨ **{name}**！{desc}{transfer_note}{purge_note}")
+            continue
+
+        if card_key == "d6":
+            old_holder = get_d6_holder()
+            set_d6_holder(message.author.id)
+            transfer_note = f"（从 <@{old_holder}> 手中转移）" if old_holder and old_holder != message.author.id else ""
+            lines.append(f"{i+1}. 🎲 **{name}**！{desc}{transfer_note}")
             continue
 
         if card_key == "error":
@@ -1119,6 +1198,8 @@ async def _settle_sellout(message: discord.Message, client: httpx.AsyncClient) -
         items.append(("curseeye", 1, True))
     if has_divinity(message.author.id):
         items.append(("divinity", 1, True))
+    if has_d6(message.author.id):
+        items.append(("d6", 1, True))
 
     if not items:
         await message.channel.send("🏷️ 你身上没有任何道具卡牌，变卖家产无效果。")
@@ -1140,6 +1221,7 @@ async def _settle_sellout(message: discord.Message, client: httpx.AsyncClient) -
                 "collector": "collector_card_holder",
                 "curseeye": "curse_eye_holder",
                 "divinity": "divinity_holder",
+                "d6": "d6_holder",
             }[card_key]
             with sqlite3.connect(DB_PATH) as conn:
                 conn.execute(
@@ -1524,9 +1606,100 @@ async def handle_offline(
         f"🔌 {message.author.mention} 使用 **下线**！\n"
         f"💥 额度从 **{quota} 点** 重置为 **{OFFLINE_RESET_QUOTA} 点**，"
         f"银行存款 **{old_balance} 点** 已清空！\n"
-        f"📴 已进入下线状态：无法被任何交互选择、无法抢红包、无法发言掉落额度。\n"
+        f"📴 已进入下线状态：无法被任何交互选择、无法抢红包、无法通过「{QUOTA_DROP_KEYWORD}」掉落额度。\n"
         f"💬 下次任意发言将解除下线状态。"
     )
+
+
+async def handle_d6(message: discord.Message, client: httpx.AsyncClient) -> None:
+    """D6：唯一道具，持有者发送「D6」掷骰重置身上的道具。
+
+    数量不变、种类改变：唯一道具重置为其他唯一道具，背包道具重置为其他背包道具。
+    每次使用消耗 D6_RECHARGE_COST 点充能；重置时 D6 自身不受影响。
+    """
+    if not has_d6(message.author.id):
+        await message.channel.send("🎲 你没有「D6」，无法使用。")
+        return
+
+    # 收集可重置的道具：背包道具 + 自身持有的其他唯一道具
+    bag_items = get_user_cards(message.author.id)
+    owned_uniques = [
+        key for key in UNIQUE_CARDS
+        if key != "d6" and UNIQUE_HOLDER_ACCESSORS[key][2](message.author.id)
+    ]
+    if not bag_items and not owned_uniques:
+        await message.channel.send("🎲 你身上没有任何可重置的道具，D6 无事可做。")
+        return
+
+    # 充能：每次使用消耗固定额度
+    quota = await query_quota(client, message.author.name)
+    if quota is None:
+        await message.channel.send("🎲 查询额度失败，请稍后再试。")
+        return
+    if quota < D6_RECHARGE_COST:
+        await message.channel.send(
+            f"🎲 额度不足：使用 D6 需要 {D6_RECHARGE_COST} 点充能，当前 {quota} 点。"
+        )
+        return
+    new_quota = await adjust_quota(client, "deduct", message.author.name, D6_RECHARGE_COST)
+    if new_quota is None:
+        await message.channel.send("🎲 充能失败（扣除额度失败），请稍后再试。")
+        return
+
+    # 重置唯一道具：换成未持有的其他唯一道具（新目标覆盖其原持有者，D6 排除在外）
+    unique_lines: list[str] = []
+    used_targets: set[str] = set()
+    for old_key in owned_uniques:
+        candidates = [
+            key for key in UNIQUE_CARDS
+            if key != "d6" and key not in owned_uniques and key not in used_targets
+        ]
+        old_name = CARD_POOL[old_key][0]
+        if not candidates:
+            unique_lines.append(f"• **{old_name}** — 候选耗尽，保持不变")
+            continue
+        new_key = random.choice(candidates)
+        used_targets.add(new_key)
+        prev_holder = UNIQUE_HOLDER_ACCESSORS[new_key][1]()
+        # 清除旧持有记录，写入新持有记录
+        old_table = UNIQUE_HOLDER_ACCESSORS[old_key][3]
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.execute(f"DELETE FROM {old_table} WHERE discord_id = ?", (message.author.id,))
+        UNIQUE_HOLDER_ACCESSORS[new_key][0](message.author.id)
+        # 重置成神性时解除身上的诅咒（与抽到神性行为一致）
+        if new_key == "divinity":
+            remove_buff(message.author.id, "curse")
+        new_name = CARD_POOL[new_key][0]
+        steal_note = (
+            f"（从 <@{prev_holder}> 手中夺得）"
+            if prev_holder and prev_holder != message.author.id
+            else ""
+        )
+        unique_lines.append(f"• **{old_name}** → **{new_name}**{steal_note}")
+
+    # 重置背包道具：先删除全部记录，再按原数量重新掷骰（撞车自动合并）
+    bag_lines: list[str] = []
+    if bag_items:
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.execute("DELETE FROM gacha_effects WHERE discord_id = ?", (message.author.id,))
+        assigned: dict[str, int] = {}
+        for old_key, count in bag_items:
+            candidates = [key for key in BAG_CARDS if key != old_key]
+            new_key = random.choice(candidates)
+            assigned[new_key] = assigned.get(new_key, 0) + count
+            old_name = CARD_POOL[old_key][0]
+            new_name = CARD_POOL[new_key][0]
+            bag_lines.append(f"• **{old_name}** ×{count} → **{new_name}**")
+        for new_key, total in assigned.items():
+            _add_effect(message.author.id, new_key, total)
+
+    result = [f"🎲 {message.author.mention} 的 **D6** 高速转动，消耗 {D6_RECHARGE_COST} 点充能！"]
+    if unique_lines:
+        result.append("🎯 唯一道具重置：\n" + "\n".join(unique_lines))
+    if bag_lines:
+        result.append("🎯 背包道具重置（数量不变）：\n" + "\n".join(bag_lines))
+    result.append(f"💰 当前额度 {new_quota} 点。")
+    await message.channel.send("\n\n".join(result))
 
 
 class WishPoolView(discord.ui.View):
@@ -1622,14 +1795,7 @@ class WishPoolView(discord.ui.View):
                 await _settle_sellout(self.message_obj, self.client)
         # 唯一道具：立即替换持有者
         elif card_key in UNIQUE_CARDS:
-            setter, getter = {
-                "snake": (set_snake_charm_holder, get_snake_charm_holder),
-                "membership": (set_membership_card_holder, get_membership_card_holder),
-                "meteor": (set_meteor_shower_holder, get_meteor_shower_holder),
-                "collector": (set_collector_card_holder, get_collector_card_holder),
-                "curseeye": (set_curse_eye_holder, get_curse_eye_holder),
-                "divinity": (set_divinity_holder, get_divinity_holder),
-            }[card_key]
+            setter, getter = UNIQUE_HOLDER_ACCESSORS[card_key][:2]
             old_holder = getter()
             setter(self.user_id)
             transfer_note = f"\n⏭️ 已从 <@{old_holder}> 手中转移！" if old_holder and old_holder != self.user_id else ""

@@ -85,6 +85,8 @@ SEDUCE_KEYWORD = "诱惑"
 YOURNAME_KEYWORD = "你的名字"
 YOURNAME_SWAP_SECONDS = 300  # 交换身体持续时间（秒）
 MY_CARDS_KEYWORD = "我的卡牌"
+D6_KEYWORD = "D6"
+D6_RECHARGE_COST = 66  # D6：每次使用的充能额度
 OFFLINE_KEYWORD = "下线"
 OFFLINE_MIN_QUOTA = 2000  # 使用下线卡牌的最低额度要求
 OFFLINE_RESET_QUOTA = 400  # 下线后额度重置值
@@ -136,7 +138,8 @@ BIG_RED_PACKET_INTERVAL_SECONDS = 600  # 机器人每 10 分钟发一次大红�
 BIG_RED_PACKET_POOL = 500  # 奖池 500 点
 BIG_RED_PACKET_OPTIONS_COUNT = 3  # 人机验证选项数（仅 1 个正确）
 
-# 发言掉落
+# 掉落
+QUOTA_DROP_KEYWORD = "来财"  # 触发掉落的关键词
 QUOTA_DROP_DB = "quota_drops.db"  # 掉落冷却数据库
 QUOTA_DROP_MAX = 50  # 单次掉落点数上限
 QUOTA_DROP_ZERO_CHANCE = 0.3  # 掉落 0 点的概率（0-1），剩余概率掉 1-50 均匀随机

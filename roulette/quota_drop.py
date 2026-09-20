@@ -1,4 +1,4 @@
-"""发言随机掉落活动额度：监听目标频道发言，随机掉落 0-50 点额度，单用户冷却。"""
+"""「来财」关键词随机掉落活动额度：监听目标频道发言，命中关键词随机掉落 0-50 点额度，单用户冷却。"""
 
 from __future__ import annotations
 
@@ -23,6 +23,7 @@ from roulette.constants import (
     QUOTA_DROP_DEDUCT_CHANCE,
     QUOTA_DROP_DEDUCT_MAX,
     QUOTA_DROP_DEDUCT_MIN,
+    QUOTA_DROP_KEYWORD,
     QUOTA_DROP_MAX,
     QUOTA_DROP_MAX_BATCH_CHARS,
     QUOTA_DROP_MIN_SEND_INTERVAL,
@@ -119,8 +120,8 @@ async def _queue_notification(channel: discord.abc.Messageable, text: str) -> No
 
 
 async def handle_drop_message(client: httpx.AsyncClient, message: discord.Message) -> None:
-    """处理一条发言的掉落逻辑（由统一的消息入口调用）。"""
-    # 下线状态：无法发言掉落额度（延迟导入避免循环依赖）
+    """处理一条「来财」发言的掉落逻辑（由统一的消息入口在关键词命中时调用）。"""
+    # 下线状态：无法通过「来财」掉落额度（延迟导入避免循环依赖）
     from roulette.gacha import clear_meteor_shower_holder, has_meteor_shower, is_offline
 
     if is_offline(message.author.id):
@@ -129,7 +130,7 @@ async def handle_drop_message(client: httpx.AsyncClient, message: discord.Messag
     discord_id = str(message.author.id)
     username = message.author.name
 
-    # 流星雨：持有者发言掉落无冷却、必定掉落额度（不掉 0、免疫扣减事件）
+    # 流星雨：持有者「来财」无冷却、必定掉落额度（不掉 0、免疫扣减事件）
     meteor = has_meteor_shower(message.author.id)
     if meteor:
         amount = random.randint(1, QUOTA_DROP_MAX)
@@ -189,4 +190,4 @@ async def handle_drop_message(client: httpx.AsyncClient, message: discord.Messag
 def start_quota_drop() -> None:
     """初始化掉落服务（建库、打印启动信息）。"""
     _init_db()
-    print(f"[QuotaDrop] 已启动，监听频道 {QUOTA_CHANNEL_ID}，冷却数据库 {DB_PATH}")
+    print(f"[QuotaDrop] 已启动，监听频道 {QUOTA_CHANNEL_ID}，关键词「{QUOTA_DROP_KEYWORD}」触发掉落，冷却数据库 {DB_PATH}")

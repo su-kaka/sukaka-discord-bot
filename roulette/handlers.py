@@ -1,4 +1,4 @@
-"""统一的消息入口：各小游戏命令分发 + 发言掉落。"""
+"""统一的消息入口：各小游戏命令分发 + 「来财」关键词掉落。"""
 
 from __future__ import annotations
 
@@ -38,6 +38,7 @@ from roulette.constants import (
     BLESS_KEYWORD,
     BLESS_ALLIN_SUCCESS_CHANCE,
     CURSE_KEYWORD,
+    D6_KEYWORD,
     DUEL_COOLDOWN_SECONDS,
     DUEL_FEE_PERCENT,
     DUEL_KEYWORD,
@@ -56,6 +57,7 @@ from roulette.constants import (
     OFFLINE_KEYWORD,
     PLAYER_COUNT,
     QUOTA_CHANNEL_ID,
+    QUOTA_DROP_KEYWORD,
     RED_PACKET_COOLDOWN_SECONDS,
     RED_PACKET_COST_PERCENT,
     RED_PACKET_FEE_PERCENT,
@@ -76,6 +78,7 @@ from roulette.duel import DuelView
 from roulette.gacha import (
     clear_offline,
     consume_effect,
+    handle_d6,
     handle_gacha,
     handle_my_cards,
     handle_offline,
@@ -98,7 +101,7 @@ if TYPE_CHECKING:
 
 
 def start_roulette(bot: "SukakaBot") -> None:
-    """注册游戏区的消息入口：赌大小触发 + 发言掉落。"""
+    """注册游戏区的消息入口：赌大小触发 + 「来财」掉落。"""
     client = httpx.AsyncClient(timeout=API_TIMEOUT_SECONDS)
     current_banker: dict[str, Optional[discord.Member | discord.User]] = {"banker": None}
     active_begs: dict[int, BegView] = {}
@@ -135,7 +138,7 @@ def start_roulette(bot: "SukakaBot") -> None:
 
         content = message.content.strip()
 
-        # 下线状态：任意发言解除下线，本次发言不触发额度掉落
+        # 下线状态：任意发言解除下线，本次发言不触发额度掉落（含「来财」）
         skip_drop = False
         if is_offline(message.author.id):
             clear_offline(message.author.id)
@@ -261,6 +264,11 @@ def start_roulette(bot: "SukakaBot") -> None:
             await handle_my_cards(message)
             return
 
+        # D6：持有者掷骰重置身上的道具（数量不变、种类改变）
+        if content == D6_KEYWORD:
+            await handle_d6(message, client)
+            return
+
         # 存钱：将 50% 额度存入地精银行
         if content == BANK_KEYWORD:
             await handle_deposit(message, client)
@@ -309,6 +317,7 @@ def start_roulette(bot: "SukakaBot") -> None:
                 "🏦💰 **抢银行**：三人组队抢银行，随机选 1-10 个存款 ≥ 500 的目标，装备总和决定成功率（跑刀+5%/起枪+15%/全甲+30%），成功返还投入+收益，失败损失投入。\n"
                 "🧧🧧 **大红包**：机器人每 10 分钟发 500 点，最多 8 人抢，全员分完整池。\n"
                 "**买彩票**：10 点一张，5% 概率赢走全部奖池，未中奖 8 点进奖池（2 点销毁），奖池基础 50 点。\n"
+                "🧧 **来财**：发送「来财」随机掉落 0-50 点额度（30% 概率掉 0 点，10% 概率反而被扣 1-50 点），每次触发后进入 30-180 秒随机冷却。\n"
                 "🏆 **排行榜**：展示活动额度前十用户。"
             )
             await message.channel.send(rules)
@@ -535,8 +544,10 @@ def start_roulette(bot: "SukakaBot") -> None:
                 current_banker["banker"] = None
             return
 
-        if not skip_drop:
+        # 来财：关键词触发掉落（执行了游戏命令的发言不会到这里；刚解除下线的发言也不掉落）
+        if content == QUOTA_DROP_KEYWORD and not skip_drop:
             await handle_drop_message(client, message)
+            return
 
     # 消息入口注册到 bot 的分发注册表（bot.py 持有唯一的 on_message）
     bot.register_message_handler(QUOTA_CHANNEL_ID, on_message)

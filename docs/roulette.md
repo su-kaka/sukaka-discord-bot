@@ -8,7 +8,7 @@
 start_roulette(bot)
  ├── 创建共享 httpx.AsyncClient（活动额度 API 用）
  ├── 启动 3 个后台任务：大红包循环、抢银行邀请循环、身体交换恢复
- ├── start_quota_drop()（发言掉落初始化）
+ ├── start_quota_drop()（「来财」掉落初始化）
  └── @bot.event on_message     ← 全项目唯一的消息监听
       └── 按消息文本前缀/全等匹配关键词 → 调用各游戏的 handle_xxx()
 ```
@@ -21,7 +21,7 @@ start_roulette(bot)
 | `handlers.py` | 520 | 消息入口：关键词分发、梭哈/红包/乞讨/庄家的内联逻辑、各冷却字典 |
 | `constants.py` | 145 | **所有可调参数**：关键词、点数、概率、冷却、阈值、DB 文件名 |
 | `api.py` | 71 | 活动额度 API 封装：`query_quota` / `adjust_quota` / `query_top_quota` |
-| `quota_drop.py` | 176 | 发言掉落：30% 掉 0 点、10% 扣减事件、SQLite 原子冷却、通知合并发送 |
+| `quota_drop.py` | 176 | 「来财」关键词掉落：30% 掉 0 点、10% 扣减事件、SQLite 原子冷却、通知合并发送 |
 | `dice_game.py` | 140 | 赌大小：与庄家（玩家或机器人）各押 5 点 roll 点比大小 |
 | `beg.py` | 96 | 乞讨：按钮施舍，乞讨者 +5、施舍者 -7 |
 | `duel.py` | 193 | 决斗：押额度较少方全部，赢家得 80% |
@@ -46,8 +46,8 @@ start_roulette(bot)
 1. **关键词匹配是顺序敏感的**：`content.startswith(...)` 类（结婚/诅咒/决斗/抢劫/诱惑/你的名字）和 `content == ...` 类（其余）混排，新增关键词注意别被已有的前缀规则截胡。
 2. **冷却字典全部闭包在 `start_roulette()` 里**（`beg_cooldowns`、`duel_cooldowns` 等 dict[int, float]，存 `time.monotonic()` 到期时间），通过 `on_finish` 回调传给各 View 在结束时写入。重启即清零，属可接受设计。
 3. **诅咒/祝福等状态 buff 存 gacha.db 的 `active_buffs` 表**（`add_buff` / `has_buff` / `remove_buff` / `get_user_buffs`），重启不丢失；各游戏模块直接查表，不再传闭包集合。
-4. **下线状态**：用户使用「下线」卡后，其**下一次任意发言**解除下线（发提示消息），且**那次发言不触发掉落**（`skip_drop` 标志）。命令匹配在其之后，所以下线者发「赌大小」会先解除下线再正常执行命令。
-5. 所有命令都 return，掉落检查 `if not skip_drop` 放在**最后**——即执行了游戏命令的发言不再触发掉落。
+4. **下线状态**：用户使用「下线」卡后，其**下一次任意发言**解除下线（发提示消息），且**那次发言不触发掉落**（`skip_drop` 标志，即使发的是「来财」）。命令匹配在其之后，所以下线者发「赌大小」会先解除下线再正常执行命令。
+5. 所有命令都 return，掉落检查 `if content == QUOTA_DROP_KEYWORD and not skip_drop` 放在**最后**——即执行了游戏命令的发言不再触发掉落。
 
 ## 额度结算约定（全包统一）
 
@@ -64,7 +64,8 @@ start_roulette(bot)
   - `consume_effect(user_id, key) -> bool`：读出即消费（一次性卡）；
   - `has_effect(user_id, key) -> bool`：只查不消费；
   - `is_offline(user_id) -> bool` / `clear_offline`：下线状态。
-- 唯一道具（蛇符咒、会员卡、流星雨、收藏家、诅咒之眼、神性）用单行表 `snake_charm_holder` / `membership_card_holder` / `meteor_shower_holder` / `collector_card_holder` / `curse_eye_holder` / `divinity_holder` 存持有者。**流星雨**：持有者发言掉落**无冷却且必定掉落额度**（见 quota_drop.py），每次掉落后 `METEOR_DISSIPATE_CHANCE`（22.22%）概率**星光消散**（`clear_meteor_shower_holder` 销毁，直到消散或被他人抽到/抢走/变卖）。收藏家持有期间，抽卡获得的背包道具次数**叠加**（重复抽到 +1，核心函数 `_add_effect_on_draw`）；未持有收藏家时重复抽到不叠加，但**保留已有数量不会重置**。抢劫偷来的背包道具一律叠加（+1）到自己的背包。
+- 唯一道具（蛇符咒、会员卡、流星雨、收藏家、诅咒之眼、神性、D6）用单行表 `snake_charm_holder` / `membership_card_holder` / `meteor_shower_holder` / `collector_card_holder` / `curse_eye_holder` / `divinity_holder` / `d6_holder` 存持有者。**流星雨**：持有者发送「来财」掉落**无冷却且必定掉落额度**（见 quota_drop.py），每次掉落后 `METEOR_DISSIPATE_CHANCE`（22.22%）概率**星光消散**（`clear_meteor_shower_holder` 销毁，直到消散或被他人抽到/抢走/变卖）。收藏家持有期间，抽卡获得的背包道具次数**叠加**（重复抽到 +1，核心函数 `_add_effect_on_draw`）；未持有收藏家时重复抽到不叠加，但**保留已有数量不会重置**。抢劫偷来的背包道具一律叠加（+1）到自己的背包。
+- **D6**（`gacha.py` 的 `handle_d6`）：唯一道具，持有者发送 `D6` 关键词触发，掷骰重置身上的道具——**数量不变、种类改变**：唯一道具重置为其他唯一道具（新目标的原持有者被覆盖，与抽到/抢夺行为一致；重置成神性时同样解除诅咒），背包道具重置为其他背包道具（撞车自动合并数量，`BAG_CARDS` 为候选池）。每次使用需 `D6_RECHARGE_COST`（66 点）充能，额度不足/身上无可重置道具时不消耗；重置时 D6 自身不受影响（固定持有，直到被他人抽到/抢走/变卖）。唯一道具持有者存取统一收敛到 `UNIQUE_HOLDER_ACCESSORS` 映射。
 - **神性**（`bless.py` 的 `handle_bless` + `handlers.py` 梭哈分支）：唯一道具，抽到即**解除身上的诅咒**（`remove_buff(user, "curse")`），并解锁 `祝福 @某人` 能力。祝福写入 `active_buffs` 表的 `bless` buff（不进背包，不可被抢夺/变卖/交换，随「我的卡牌」展示在「身上状态」区），梭哈时：持有一念天堂则**覆盖祝福**（75% + 翻三倍，祝福不消耗保留）；否则祝福生效（成功率 `BLESS_ALLIN_SUCCESS_CHANCE` = 75%，倍率不变，结算后消耗）。每次祝福 `DIVINITY_EXHAUST_CHANCE`（50%）概率神力耗尽（`clear_divinity_holder` 销毁）。
 - **状态 buff 表 `active_buffs`**（`discord_id, buff_key, created_at`）：存诅咒/祝福这类非道具状态（`BUFF_POOL` 定义名称与描述）。与背包表 `gacha_effects` 的区别：buff 不占卡牌槽、不进抽卡池、不可被偷/卖/交换，「我的卡牌」单独展示。
 - **诅咒之眼**（`curse.py` 的 `_settle_curse_eye`）：持有者发送 `诅咒 @某人` 时**在普通诅咒流程（押 10 点、必输 debuff）正常结算之后额外叠加**——目标额度重置为 `CURSE_EYE_QUOTA_MIN`-`CURSE_EYE_QUOTA_MAX`（0-1000）随机值，每次使用 `CURSE_EYE_DESTROY_CHANCE`（44.44%）概率销毁（`clear_curse_eye_holder`）。效果**无法被借刀杀人反弹**（借刀杀人只转嫁普通诅咒）；持有者**无视诅咒冷却**（不检查也不写入 `curse_cooldowns`），可发送 `诅咒 @自己`（不押点，仅诅咒之眼效果，不入诅咒名单）。普通诅咒逻辑不变，未持有者无此效果。
@@ -81,17 +82,17 @@ start_roulette(bot)
 - 结算用 `asyncio.gather` 并发发放；
 - `on_timeout` 自动开奖；用户红包无人抢时退回发送者。
 
-## 发言掉落（quota_drop.py）
+## 「来财」掉落（quota_drop.py）
 
-- 每条非命令发言都可能触发：30% 概率掉 0 点，否则掉 1–50 点；另有 10% 概率变成「扣减 1–50 点」事件。
-- 单用户冷却 30–180 秒随机，用 SQLite `INSERT ... ON CONFLICT ... WHERE` 原子写入（`quota_drops.db`）。流星雨持有者**完全无视冷却**：每条发言必定掉落 1–50 点（不掉 0、免疫 10% 扣减事件），每次掉落后 `METEOR_DISSIPATE_CHANCE`（22.22%）概率**星光消散**（流星雨销毁并播报）。
+- 发送 `来财` 关键词触发（`QUOTA_DROP_KEYWORD`，精确匹配）：30% 概率掉 0 点，否则掉 1–50 点；另有 10% 概率变成「扣减 1–50 点」事件。执行了游戏命令的发言不会触发掉落（命令分支全部提前 return）；刚解除下线的那条发言也不掉落（`skip_drop`）。
+- 单用户冷却 30–180 秒随机，用 SQLite `INSERT ... ON CONFLICT ... WHERE` 原子写入（`quota_drops.db`）。流星雨持有者**完全无视冷却**：每次「来财」必定掉落 1–50 点（不掉 0、免疫 10% 扣减事件），每次掉落后 `METEOR_DISSIPATE_CHANCE`（22.22%）概率**星光消散**（流星雨销毁并播报）。
 - 通知**批量合并发送**：模块级缓冲区 + 每 0.5 秒刷新一次，按 1800 字符拆分（Discord 2000 上限留余量），发完 10 秒自动删除。
 
 ## 数据库与常量
 
 | DB | 表 | 说明 |
 | --- | --- | --- |
-| `gacha.db` | gacha_effects / snake_charm_holder / membership_card_holder / meteor_shower_holder / collector_card_holder / curse_eye_holder / divinity_holder / active_buffs / body_swaps / offline_users | 卡牌效果、唯一道具、状态 buff 与特殊状态 |
+| `gacha.db` | gacha_effects / snake_charm_holder / membership_card_holder / meteor_shower_holder / collector_card_holder / curse_eye_holder / divinity_holder / d6_holder / active_buffs / body_swaps / offline_users | 卡牌效果、唯一道具、状态 buff 与特殊状态 |
 | `bank.db` | bank_accounts / bank_hatred / bank_heist_cooldowns 等 | 银行存款与抢劫 |
 | `lottery.db` | lottery_pool | 彩票奖池（单行） |
 | `quota_drops.db` | drop_cooldowns | 掉落冷却 |
