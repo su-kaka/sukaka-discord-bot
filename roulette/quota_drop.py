@@ -15,8 +15,8 @@ import httpx
 
 from roulette.api import adjust_quota
 from roulette.constants import (
+    METEOR_DISSIPATE_CHANCE,
     QUOTA_CHANNEL_ID,
-    QUOTA_DROP_COOLDOWN_DIVISOR,
     QUOTA_DROP_COOLDOWN_MAX_SECONDS,
     QUOTA_DROP_COOLDOWN_MIN_SECONDS,
     QUOTA_DROP_DB,
@@ -75,15 +75,6 @@ def _try_set_cooldown(discord_id: str, cooldown_until: float) -> bool:
         return cursor.rowcount > 0
 
 
-def clear_drop_cooldown(discord_id: int) -> None:
-    """清空指定用户的掉落冷却（抽到流星雨时立即生效）。"""
-    with sqlite3.connect(DB_PATH) as conn:
-        conn.execute(
-            "DELETE FROM drop_cooldowns WHERE discord_id = ?",
-            (str(discord_id),),
-        )
-
-
 async def _flush_batch(channel: discord.abc.Messageable) -> None:
     """将缓冲区中的通知合并为一条消息发送，确保距上次发送至少最小间隔秒。"""
     global _last_flush_time, _batch_task
@@ -130,7 +121,7 @@ async def _queue_notification(channel: discord.abc.Messageable, text: str) -> No
 async def handle_drop_message(client: httpx.AsyncClient, message: discord.Message) -> None:
     """处理一条发言的掉落逻辑（由统一的消息入口调用）。"""
     # 下线状态：无法发言掉落额度（延迟导入避免循环依赖）
-    from roulette.gacha import has_meteor_shower, is_offline
+    from roulette.gacha import clear_meteor_shower_holder, has_meteor_shower, is_offline
 
     if is_offline(message.author.id):
         return
@@ -138,46 +129,61 @@ async def handle_drop_message(client: httpx.AsyncClient, message: discord.Messag
     discord_id = str(message.author.id)
     username = message.author.name
 
-    amount = _roll_drop_amount()
-    cooldown_seconds = random.uniform(
-        QUOTA_DROP_COOLDOWN_MIN_SECONDS, QUOTA_DROP_COOLDOWN_MAX_SECONDS
-    )
-    # 流星雨：持有者冷却减半
-    if has_meteor_shower(message.author.id):
-        cooldown_seconds /= QUOTA_DROP_COOLDOWN_DIVISOR
-    cooldown_until = time.time() + cooldown_seconds
+    # 流星雨：持有者发言掉落无冷却、必定掉落额度（不掉 0、免疫扣减事件）
+    meteor = has_meteor_shower(message.author.id)
+    if meteor:
+        amount = random.randint(1, QUOTA_DROP_MAX)
+    else:
+        amount = _roll_drop_amount()
+        cooldown_seconds = random.uniform(
+            QUOTA_DROP_COOLDOWN_MIN_SECONDS, QUOTA_DROP_COOLDOWN_MAX_SECONDS
+        )
+        cooldown_until = time.time() + cooldown_seconds
 
-    # 原子检查+写入冷却；无论结果如何都进冷却
-    if not _try_set_cooldown(discord_id, cooldown_until):
-        return
-
-    # 一定概率触发扣减事件（流星雨持有者免疫：改为正常掉落）
-    if random.random() < QUOTA_DROP_DEDUCT_CHANCE and not has_meteor_shower(message.author.id):
-        deduct_amount = random.randint(QUOTA_DROP_DEDUCT_MIN, QUOTA_DROP_DEDUCT_MAX)
-        current_quota = await adjust_quota(client, "deduct", username, deduct_amount)
-        if current_quota is None:
+        # 原子检查+写入冷却；无论结果如何都进冷却
+        if not _try_set_cooldown(discord_id, cooldown_until):
             return
-        await _queue_notification(
-            message.channel,
-            f"💸 {message.author.mention} 运气不佳，被扣减 {deduct_amount} 点活动额度，当前额度 {current_quota} 点……",
-        )
-        return
 
-    if amount == 0:
-        await _queue_notification(
-            message.channel,
-            f"💨 {message.author.mention} 很遗憾，这次没有掉落额度，下次好运！",
-        )
-        return
+        # 一定概率触发扣减事件（流星雨持有者不会走到该分支）
+        if random.random() < QUOTA_DROP_DEDUCT_CHANCE:
+            deduct_amount = random.randint(QUOTA_DROP_DEDUCT_MIN, QUOTA_DROP_DEDUCT_MAX)
+            current_quota = await adjust_quota(client, "deduct", username, deduct_amount)
+            if current_quota is None:
+                return
+            await _queue_notification(
+                message.channel,
+                f"💸 {message.author.mention} 运气不佳，被扣减 {deduct_amount} 点活动额度，当前额度 {current_quota} 点……",
+            )
+            return
+
+        if amount == 0:
+            await _queue_notification(
+                message.channel,
+                f"💨 {message.author.mention} 很遗憾，这次没有掉落额度，下次好运！",
+            )
+            return
 
     current_quota = await adjust_quota(client, "grant", username, amount)
     if current_quota is None:
         return
 
-    await _queue_notification(
-        message.channel,
-        f"🎉 {message.author.mention} 幸运掉落 {amount} 点活动额度，当前额度 {current_quota} 点！",
-    )
+    if meteor:
+        await _queue_notification(
+            message.channel,
+            f"☄️ {message.author.mention} 流星雨眷顾，必定掉落 {amount} 点活动额度，当前额度 {current_quota} 点！",
+        )
+        # 每次掉落有概率星光消散（流星雨销毁）
+        if random.random() < METEOR_DISSIPATE_CHANCE:
+            if clear_meteor_shower_holder(message.author.id):
+                await _queue_notification(
+                    message.channel,
+                    f"💫 {message.author.mention} 身上的流星雨星光渐渐消散，流星雨效果已结束……",
+                )
+    else:
+        await _queue_notification(
+            message.channel,
+            f"🎉 {message.author.mention} 幸运掉落 {amount} 点活动额度，当前额度 {current_quota} 点！",
+        )
 
 
 def start_quota_drop() -> None:

@@ -64,7 +64,7 @@ start_roulette(bot)
   - `consume_effect(user_id, key) -> bool`：读出即消费（一次性卡）；
   - `has_effect(user_id, key) -> bool`：只查不消费；
   - `is_offline(user_id) -> bool` / `clear_offline`：下线状态。
-- 唯一道具（蛇符咒、会员卡、流星雨、收藏家、诅咒之眼、神性）用单行表 `snake_charm_holder` / `membership_card_holder` / `meteor_shower_holder` / `collector_card_holder` / `curse_eye_holder` / `divinity_holder` 存持有者。抽到流星雨时立即清空该用户掉落冷却（`clear_drop_cooldown`），下一条发言即可掉落。收藏家持有期间，抽卡获得的背包道具次数**叠加**（重复抽到 +1，核心函数 `_add_effect_on_draw`）；未持有收藏家时重复抽到不叠加，但**保留已有数量不会重置**。抢劫偷来的背包道具一律叠加（+1）到自己的背包。
+- 唯一道具（蛇符咒、会员卡、流星雨、收藏家、诅咒之眼、神性）用单行表 `snake_charm_holder` / `membership_card_holder` / `meteor_shower_holder` / `collector_card_holder` / `curse_eye_holder` / `divinity_holder` 存持有者。**流星雨**：持有者发言掉落**无冷却且必定掉落额度**（见 quota_drop.py），每次掉落后 `METEOR_DISSIPATE_CHANCE`（22.22%）概率**星光消散**（`clear_meteor_shower_holder` 销毁，直到消散或被他人抽到/抢走/变卖）。收藏家持有期间，抽卡获得的背包道具次数**叠加**（重复抽到 +1，核心函数 `_add_effect_on_draw`）；未持有收藏家时重复抽到不叠加，但**保留已有数量不会重置**。抢劫偷来的背包道具一律叠加（+1）到自己的背包。
 - **神性**（`bless.py` 的 `handle_bless` + `handlers.py` 梭哈分支）：唯一道具，抽到即**解除身上的诅咒**（`remove_buff(user, "curse")`），并解锁 `祝福 @某人` 能力。祝福写入 `active_buffs` 表的 `bless` buff（不进背包，不可被抢夺/变卖/交换，随「我的卡牌」展示在「身上状态」区），梭哈时：持有一念天堂则**覆盖祝福**（75% + 翻三倍，祝福不消耗保留）；否则祝福生效（成功率 `BLESS_ALLIN_SUCCESS_CHANCE` = 75%，倍率不变，结算后消耗）。每次祝福 `DIVINITY_EXHAUST_CHANCE`（50%）概率神力耗尽（`clear_divinity_holder` 销毁）。
 - **状态 buff 表 `active_buffs`**（`discord_id, buff_key, created_at`）：存诅咒/祝福这类非道具状态（`BUFF_POOL` 定义名称与描述）。与背包表 `gacha_effects` 的区别：buff 不占卡牌槽、不进抽卡池、不可被偷/卖/交换，「我的卡牌」单独展示。
 - **诅咒之眼**（`curse.py` 的 `_settle_curse_eye`）：持有者发送 `诅咒 @某人` 时**在普通诅咒流程（押 10 点、必输 debuff）正常结算之后额外叠加**——目标额度重置为 `CURSE_EYE_QUOTA_MIN`-`CURSE_EYE_QUOTA_MAX`（0-1000）随机值，每次使用 `CURSE_EYE_DESTROY_CHANCE`（44.44%）概率销毁（`clear_curse_eye_holder`）。效果**无法被借刀杀人反弹**（借刀杀人只转嫁普通诅咒）；持有者**无视诅咒冷却**（不检查也不写入 `curse_cooldowns`），可发送 `诅咒 @自己`（不押点，仅诅咒之眼效果，不入诅咒名单）。普通诅咒逻辑不变，未持有者无此效果。
@@ -84,7 +84,7 @@ start_roulette(bot)
 ## 发言掉落（quota_drop.py）
 
 - 每条非命令发言都可能触发：30% 概率掉 0 点，否则掉 1–50 点；另有 10% 概率变成「扣减 1–50 点」事件。
-- 单用户冷却 30–180 秒随机，用 SQLite `INSERT ... ON CONFLICT ... WHERE` 原子写入（`quota_drops.db`）。持有流星雨道具时冷却除以 `QUOTA_DROP_COOLDOWN_DIVISOR`（减半），且**免疫 10% 扣减事件**（改为正常掉落判定）。
+- 单用户冷却 30–180 秒随机，用 SQLite `INSERT ... ON CONFLICT ... WHERE` 原子写入（`quota_drops.db`）。流星雨持有者**完全无视冷却**：每条发言必定掉落 1–50 点（不掉 0、免疫 10% 扣减事件），每次掉落后 `METEOR_DISSIPATE_CHANCE`（22.22%）概率**星光消散**（流星雨销毁并播报）。
 - 通知**批量合并发送**：模块级缓冲区 + 每 0.5 秒刷新一次，按 1800 字符拆分（Discord 2000 上限留余量），发完 10 秒自动删除。
 
 ## 数据库与常量

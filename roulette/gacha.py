@@ -41,6 +41,7 @@ from roulette.constants import (
     DIVINITY_EXHAUST_CHANCE,
     MARRY_FEE_PERCENT,
     MARRY_MIN_FEE,
+    METEOR_DISSIPATE_CHANCE,
     OFFLINE_MIN_QUOTA,
     OFFLINE_RESET_QUOTA,
     PACKET_TIMEOUT_SECONDS,
@@ -64,7 +65,7 @@ CARD_POOL: dict[str, tuple[str, str, int]] = {
     "selfdestruct": ("自爆", f"额度归零，随机销毁 {GACHA_SELFDESTRUCT_MIN_PERCENT}%-{GACHA_SELFDESTRUCT_MAX_PERCENT}%，剩余生成红包供所有人抢", 10),
     "snake": ("蛇符咒", "排行榜隐身，不会被劫富济贫，效果永久（唯一道具，直到下一个人抽到）", 5),
     "membership": ("会员卡", "抽卡费用减半、抽卡 CD 减半，效果永久（唯一道具，直到下一个人抽到）", 5),
-    "meteor": ("流星雨", "发言掉落冷却减半、不会被运气不好扣减额度，效果永久（唯一道具，直到下一个人抽到）", 5),
+    "meteor": ("流星雨", f"发言掉落无冷却且必定掉落额度，每次掉落后有 {round(METEOR_DISSIPATE_CHANCE*100, 2)}% 概率星光消散（唯一道具，直到星光消散或下一个人抽到）", 5),
     "provoke": ("挑衅", "下次发起决斗时对方无法拒绝，决斗立即自动结算", 10),
     "error": ("错误", f"额度重置为 {GACHA_ERROR_MIN}-{GACHA_ERROR_MAX} 之间的随机值", 5),
     "retry": ("这把不算", "梭哈或决斗失败后可重来一次", 10),
@@ -318,6 +319,19 @@ def get_meteor_shower_holder() -> Optional[int]:
 def has_meteor_shower(discord_id: int) -> bool:
     """是否持有流星雨（唯一道具）。"""
     return get_meteor_shower_holder() == discord_id
+
+
+def clear_meteor_shower_holder(discord_id: Optional[int] = None) -> bool:
+    """星光消散：销毁流星雨。传入 discord_id 时仅当其仍为持有者才销毁，返回是否实际销毁。"""
+    with sqlite3.connect(DB_PATH) as conn:
+        if discord_id is None:
+            cursor = conn.execute("DELETE FROM meteor_shower_holder WHERE id = 1")
+        else:
+            cursor = conn.execute(
+                "DELETE FROM meteor_shower_holder WHERE id = 1 AND discord_id = ?",
+                (discord_id,),
+            )
+        return cursor.rowcount > 0
 
 
 def set_collector_card_holder(discord_id: int) -> None:
@@ -707,20 +721,17 @@ async def handle_gacha(
         )
         return
 
-    # 流星雨：唯一道具，立即替换持有者，并重置掉落 CD
+    # 流星雨：唯一道具，立即替换持有者
     if card_key == "meteor":
         old_holder = get_meteor_shower_holder()
         set_meteor_shower_holder(message.author.id)
         transfer_note = ""
         if old_holder and old_holder != message.author.id:
             transfer_note = f"\n☄️ 流星雨已从 <@{old_holder}> 手中转移！"
-        from roulette.quota_drop import clear_drop_cooldown
-
-        clear_drop_cooldown(message.author.id)
         await message.channel.send(
             f"🎴 {message.author.mention} 消耗 {cost} 点抽卡……\n"
             f"☄️ **{name}**！{desc}。{transfer_note}\n"
-            f"🌠 掉落冷却已重置，下一条发言即可掉落！"
+            f"🌠 每条发言必定掉落额度且无冷却，但星光随时可能消散！"
         )
         return
 
@@ -847,10 +858,7 @@ async def _handle_multidraw(
             old_holder = get_meteor_shower_holder()
             set_meteor_shower_holder(message.author.id)
             transfer_note = f"（从 <@{old_holder}> 手中转移）" if old_holder and old_holder != message.author.id else ""
-            from roulette.quota_drop import clear_drop_cooldown
-
-            clear_drop_cooldown(message.author.id)
-            lines.append(f"{i+1}. ☄️ **{name}**！{desc}{transfer_note}（掉落冷却已重置）")
+            lines.append(f"{i+1}. ☄️ **{name}**！{desc}{transfer_note}")
             continue
 
         if card_key == "collector":
@@ -1627,11 +1635,6 @@ class WishPoolView(discord.ui.View):
             transfer_note = f"\n⏭️ 已从 <@{old_holder}> 手中转移！" if old_holder and old_holder != self.user_id else ""
             if card_key == "divinity" and remove_buff(self.user_id, "curse"):
                 transfer_note += "\n🔮 抽到神性，身上缠绕的诅咒已解除！"
-            if card_key == "meteor":
-                from roulette.quota_drop import clear_drop_cooldown
-
-                clear_drop_cooldown(self.user_id)
-                transfer_note += "\n🌠 掉落冷却已重置，下一条发言即可掉落！"
             await interaction.response.edit_message(
                 content=f"🌠 <@{self.user_id}> 从许愿池选中了 **{name}**！{desc}{transfer_note}",
                 view=self,
