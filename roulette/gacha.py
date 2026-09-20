@@ -674,10 +674,14 @@ def steal_random_card(robber_id: int, target_id: int) -> Optional[str]:
 
 
 async def handle_my_cards(message: discord.Message) -> None:
-    """处理「我的卡牌」命令：查看持有的持续型卡牌与身上状态。"""
+    """处理「我的卡牌」命令：查看持有的持续型卡牌、唯一道具与身上状态。"""
     cards = get_user_cards(message.author.id)
+    uniques = [
+        card_key for card_key in UNIQUE_CARDS
+        if UNIQUE_HOLDER_ACCESSORS[card_key][2](message.author.id)
+    ]
     buffs = get_user_buffs(message.author.id)
-    if not cards and not buffs:
+    if not cards and not uniques and not buffs:
         await message.channel.send("🎴 你目前没有生效中的卡牌。")
         return
 
@@ -685,6 +689,11 @@ async def handle_my_cards(message: discord.Message) -> None:
     for card_key, remaining in cards:
         name, desc, _ = CARD_POOL.get(card_key, (card_key, "未知效果", 0))
         lines.append(f"• **{name}** ×{remaining} — {desc}")
+    if uniques:
+        lines.append("👑 唯一道具：")
+        for card_key in uniques:
+            name, desc, _ = CARD_POOL.get(card_key, (card_key, "未知效果", 0))
+            lines.append(f"• **{name}** — {desc}")
     if buffs:
         lines.append("🌀 身上状态：")
         for buff_key in buffs:
