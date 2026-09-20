@@ -86,7 +86,7 @@ CARD_POOL: dict[str, tuple[str, str, int]] = {
     "collector": ("收藏家", "抽卡得到的背包道具可叠加次数：重复抽到相同道具时次数 +1（无收藏家时重复抽到不叠加，但保留已有数量不会重置）（唯一道具，直到下一个人抽到）", 5),
     "curseeye": ("诅咒之眼", f"持有期间发送 `诅咒 @某人`（可以诅咒自己）叠加使用诅咒之眼且无视诅咒冷却：目标额度重置为 {CURSE_EYE_QUOTA_MIN}-{CURSE_EYE_QUOTA_MAX} 之间的随机值，无法被借刀杀人反弹，每次使用有 {round(CURSE_EYE_DESTROY_CHANCE*100, 2)}% 概率销毁（唯一道具，直到下一个人抽到）", 5),
     "divinity": ("神性", f"抽到即解除身上的诅咒，解锁 `祝福 @某人` 能力：被祝福者梭哈成功率提高到 75%（无法和一念天堂叠加，一念天堂会覆盖祝福），每次祝福有 {round(DIVINITY_EXHAUST_CHANCE*100, 2)}% 概率神力耗尽（唯一道具，直到下一个人抽到）", 5),
-    "d6": ("D6", f"发送「{D6_KEYWORD}」掷骰重置身上的道具：数量不变、种类改变（唯一道具重置为其他唯一道具、背包道具重置为其他背包道具），每次使用需 {D6_RECHARGE_COST} 点充能，D6 自身不受影响（唯一道具，直到下一个人抽到）", 5),
+    "d6": ("D6", f"发送「{D6_KEYWORD}」掷骰重置身上的道具与状态：数量不变、种类改变（唯一道具重置为其他唯一道具、背包道具重置为其他背包道具、状态 buff 重置为其他状态 buff），每次使用需 {D6_RECHARGE_COST} 点充能（唯一道具，直到下一个人抽到）", 5),
     "blank": ("空白", "无效果", 40),  # 实际概率由 GACHA_BLANK_CHANCE 控制
 }
 
@@ -860,7 +860,7 @@ async def handle_gacha(
         await message.channel.send(
             f"🎴 {message.author.mention} 消耗 {cost} 点抽卡……\n"
             f"🎲 **{name}**！{desc}。{transfer_note}\n"
-            f"🎲 现在发送「{D6_KEYWORD}」即可掷骰重置身上的道具！"
+            f"🎲 现在发送「{D6_KEYWORD}」即可掷骰重置身上的道具与状态！"
         )
         return
 
@@ -1651,23 +1651,24 @@ async def handle_offline(
 
 
 async def handle_d6(message: discord.Message, client: httpx.AsyncClient) -> None:
-    """D6：唯一道具，持有者发送「D6」掷骰重置身上的道具。
+    """D6：唯一道具，持有者发送「D6」掷骰重置身上的道具与状态 buff。
 
-    数量不变、种类改变：唯一道具重置为其他唯一道具，背包道具重置为其他背包道具。
-    每次使用消耗 D6_RECHARGE_COST 点充能；重置时 D6 自身不受影响。
+    数量不变、种类改变：唯一道具重置为其他唯一道具，背包道具重置为其他背包道具，
+    身上状态 buff 重置为其他状态 buff。每次使用消耗 D6_RECHARGE_COST 点充能；重置时 D6 自身不受影响。
     """
     if not has_d6(message.author.id):
         await message.channel.send("🎲 你没有「D6」，无法使用。")
         return
 
-    # 收集可重置的道具：背包道具 + 自身持有的其他唯一道具
+    # 收集可重置的目标：背包道具 + 自身持有的其他唯一道具 + 身上状态 buff
     bag_items = get_user_cards(message.author.id)
     owned_uniques = [
         key for key in UNIQUE_CARDS
         if key != "d6" and UNIQUE_HOLDER_ACCESSORS[key][2](message.author.id)
     ]
-    if not bag_items and not owned_uniques:
-        await message.channel.send("🎲 你身上没有任何可重置的道具，D6 无事可做。")
+    user_buffs = get_user_buffs(message.author.id)
+    if not bag_items and not owned_uniques and not user_buffs:
+        await message.channel.send("🎲 你身上没有任何可重置的道具或状态，D6 无事可做。")
         return
 
     # 充能：每次使用消耗固定额度
@@ -1732,11 +1733,35 @@ async def handle_d6(message: discord.Message, client: httpx.AsyncClient) -> None
         for new_key, total in assigned.items():
             _add_effect(message.author.id, new_key, total)
 
+    # 重置身上状态 buff：种类改变（buff 为单实例状态不叠加，候选耗尽保持不变）
+    buff_lines: list[str] = []
+    # 唯一道具重置期间可能解除诅咒（重置成神性），这里重新读取当前身上的状态
+    current_buffs = get_user_buffs(message.author.id)
+    if current_buffs:
+        used_buff_targets: set[str] = set()
+        for old_key in current_buffs:
+            candidates = [
+                key for key in BUFF_POOL
+                if key != old_key and key not in current_buffs and key not in used_buff_targets
+            ]
+            old_name = BUFF_POOL[old_key][0]
+            if not candidates:
+                buff_lines.append(f"• **{old_name}** — 候选耗尽，保持不变")
+                continue
+            new_key = random.choice(candidates)
+            used_buff_targets.add(new_key)
+            remove_buff(message.author.id, old_key)
+            add_buff(message.author.id, new_key)
+            new_name = BUFF_POOL[new_key][0]
+            buff_lines.append(f"• **{old_name}** → **{new_name}**")
+
     result = [f"🎲 {message.author.mention} 的 **D6** 高速转动，消耗 {D6_RECHARGE_COST} 点充能！"]
     if unique_lines:
         result.append("🎯 唯一道具重置：\n" + "\n".join(unique_lines))
     if bag_lines:
         result.append("🎯 背包道具重置（数量不变）：\n" + "\n".join(bag_lines))
+    if buff_lines:
+        result.append("🌀 身上状态重置：\n" + "\n".join(buff_lines))
     result.append(f"💰 当前额度 {new_quota} 点。")
     await message.channel.send("\n\n".join(result))
 
