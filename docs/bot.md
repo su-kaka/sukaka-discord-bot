@@ -20,7 +20,8 @@ bot.py
 main()
  └── bot = SukakaBot(); bot.run(token)
       ├── setup_hook()（登录前）
-      │    └── register_commands(bot)     # channel_admin 的 4 个斜杠命令
+      │    ├── register_commands(bot)     # channel_admin 的 4 个斜杠命令
+      │    └── register_mama_commands(bot)  # mama 的 3 个斜杠命令（/登记妈妈 /找妈妈 /家庭组教程）
       └── on_ready()（登录后，可能因重连多次触发）
            ├── await self.tree.sync()          # 同步斜杠命令到 Discord（仅首次）
            ├── 恢复未到期的频道禁言            # start_channel_mute_restores（读 channel_mutes.db）
@@ -30,7 +31,7 @@ main()
 
 ### `on_ready` 的幂等保护
 
-Discord 重连时 `on_ready` 会被再次调用。每个功能都对应一个 `self._xxx_started` 布尔标志（`_synced`、`_channel_mutes_started`、`_carousel_started`、`_roulette_started`），保证任务只启动一次。**新增启动逻辑时必须沿用这个模式**，否则重连后会重复开任务（例如大红包循环会翻倍发红包）。
+Discord 重连时 `on_ready` 会被再次调用。每个功能都对应一个 `self._xxx_started` 布尔标志（`_synced`、`_channel_mutes_started`、`_carousel_started`、`_roulette_started`），保证任务只启动一次。**新增启动逻辑时必须沿用这个模式**，否则重连后会重复开任务（例如大红包循环会翻倍发红包）。斜杠命令注册走 `setup_hook()`（discord.py 保证每次连接只调一次），不需要幂等标志。
 
 ## SukakaBot 的状态容器
 
@@ -86,7 +87,7 @@ async def on_message(self, message: discord.Message) -> None:
 
 - **`@bot.event` 是覆盖语义**（discord.py 单播），所以全项目只允许这一处 `on_message`；功能模块一律通过 `register_message_handler` 注册，bot 消息在分发前统一过滤。
 - 一个频道可以注册多个处理器（按注册顺序依次执行）；没有注册处理器的频道消息直接丢弃。
-- `roulette`（游戏频道 `1545664527410929745`）与 `mama`（找妈妈频道 `1455038454772531311`）都走这套机制。channel_admin 用斜杠命令、carousel 用定时任务，不参与消息分发。
+- **`roulette`**（游戏频道 `1545664527410929745`）走这套机制。mama 已改为斜杠命令（ephemeral 响应，不监听消息）、channel_admin 用斜杠命令、carousel 用定时任务，均不参与消息分发。
 
 ## 新增功能模块时的改动点
 

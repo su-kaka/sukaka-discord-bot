@@ -17,7 +17,7 @@ from channel_admin import (  # noqa: E402
     register_commands,
     start_channel_mute_restores,
 )
-from mama import start_mama  # noqa: E402
+from mama import register_commands as register_mama_commands  # noqa: E402
 from roulette import start_roulette  # noqa: E402
 
 # 消息处理器：频道 ID -> [async (message) -> None]，各模块在 start_xxx 里注册
@@ -42,10 +42,10 @@ class SukakaBot(discord.Client):
         self._carousel_started = False
         self._carousel_task: Optional[asyncio.Task[None]] = None
         self._roulette_started = False
-        self._mama_started = False
 
     async def setup_hook(self) -> None:
         register_commands(self)
+        register_mama_commands(self)
 
     def register_message_handler(self, channel_id: int, handler: MessageHandler) -> None:
         """注册某频道的消息处理器。各功能模块在 start_xxx 里调用，自行声明监听的频道。"""
@@ -71,9 +71,6 @@ class SukakaBot(discord.Client):
         if not self._roulette_started:
             self._roulette_started = True
             start_roulette(self)
-        if not self._mama_started:
-            self._mama_started = True
-            start_mama(self)
         print(f"Logged in as {self.user} ({self.user.id})")
 
 

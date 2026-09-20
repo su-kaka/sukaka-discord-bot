@@ -1,11 +1,9 @@
-- Build 渠道：gemini-3.7-flash、gemini-3.8-flash 每天分别有 100 条。北京时间下午三点额度刷新。
-GCLI 凭证报错：
-- 如果出现 `403 You do not have a valid license of this product.`，请开通 Pro，或寻找可用的家庭组。
-- 如果 GCLI 报错消息中包含 `Verify your account to continue.`，点击快验按钮，然后点击显示的链接完成验证即可。验证失败可以尝试这个方法：https://discord.com/channels/1134557553011998840/1543395896409071736
-GCLI额度获取：
-- 上传一个pro凭证（学生pro或者企业pro） → 获得 **500 pro额度 3000点flash额度**（可以额外吃glm-5.3 kimi-k2.6 dsv4p）
-- 上传一个free凭证 → 获得 **1000点flash额度**（可以额外吃glm5.3f dsv4f）
-找妈妈（家庭组互助）：
-- 想找人拉你进谷歌家庭组共享 Pro？在本频道发送「找妈妈」查看所有愿意分享位置的成员，在菜单里选一位直接私信联系
-- 乐意分享位置、还有空位的成员：发送「登记妈妈」，点按钮填写区域和备注即可登记，随时可更新或删除
-- 想自己组家庭组共享 Pro？发送「家庭组教程」查看完整步骤（准备工作、加入方法、常见失败原因等）
+大锅饭网址：https://catiecli.sukaka.top/ 限DC登录
+- Build 渠道：gemini-3.7-flash / gemini-3.8-flash 每天各 100 条，北京时间 15:00 刷新
+- GCLI 凭证报错`403 You do not have a valid license` → 开通 Pro，或找可用的家庭组
+- Pro 凭证（学生/企业）→ **500 Pro 额度 + 3000 Flash 点**（可吃 glm-5.3 / kimi-k2.6 / dsv4p）
+- Free 凭证 → **1000 Flash 点**（可吃 glm5.3f / dsv4f）
+**🏠 找妈妈命令如下（家庭组互助）**
+- /找妈妈：查看愿意拉你共享 Pro 的成员，选一位直接私信
+- /登记妈妈：有空位的成员登记分享位置（区域+备注），可随时更新或删除
+- /家庭组教程：自己组家庭组共享 Pro 的完整步骤

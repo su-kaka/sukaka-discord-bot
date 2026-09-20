@@ -1,4 +1,4 @@
-"""找妈妈：家庭组共享登记。发送「登记妈妈」弹窗编辑登记，发送「找妈妈」查看登记列表。"""
+"""找妈妈：家庭组共享登记。三个斜杠命令 /登记妈妈 /找妈妈 /家庭组教程，全部响应 ephemeral，仅发起者本人可见。"""
 
 from __future__ import annotations
 
@@ -14,21 +14,19 @@ import discord
 if TYPE_CHECKING:
     from bot import SukakaBot
 
-MAMA_CHANNEL_ID = 1455038454772531311
-REGISTER_KEYWORD = "登记妈妈"
-FIND_KEYWORD = "找妈妈"
-GUIDE_KEYWORD = "家庭组教程"
-# 「家庭组教程」发送 docs/family-group-guide.md 的渲染结果，改教程只改那一个文件
+MAMA_CHANNEL_ID = 1455038454772531311  # 只在这个频道响应 mama 斜杠命令
+
+# 「/家庭组教程」发送 docs/family-group-guide.md 的渲染结果，改教程只改那一个文件
 GUIDE_FILE = Path(os.getenv("MAMA_GUIDE_FILE", "docs/family-group-guide.md"))
 
 DB_PATH = Path(os.getenv("MAMA_DB", "mama.db"))
 
-PROMPT_DELETE_AFTER = 60  # 登记提示消息存活秒数
-LIST_DELETE_AFTER = 120  # 列表消息存活秒数
+PROMPT_VIEW_TIMEOUT = 300  # /登记妈妈 提示消息上的按钮有效期（秒）
+LIST_VIEW_TIMEOUT = 600  # /找妈妈 列表消息上的下拉菜单有效期（秒）
 REGION_MAX_LENGTH = 50  # 区域输入框长度上限（保证能进 Select description）
 NOTE_MAX_LENGTH = 200  # 备注输入框长度上限
 SELECT_MAX_OPTIONS = 25  # Discord Select 选项硬上限
-LIST_MAX_CHARS = 1800  # 列表单条消息字符上限（Discord 限 2000，留余量）
+MESSAGE_MAX_CHARS = 1800  # 单条消息字符上限（Discord 限 2000，留余量）
 
 
 class MamaRegistration(NamedTuple):
@@ -113,36 +111,26 @@ def get_all_registrations() -> list[MamaRegistration]:
 
 
 class RegisterPromptView(discord.ui.View):
-    """「登记妈妈」提示消息上的两个操作按钮。
+    """「/登记妈妈」ephemeral 提示消息上的两个操作按钮。
 
-    消息由 delete_after 自动删除，View 的 timeout 与消息存活时间对齐；
-    超时后无需（也不能）编辑消息，故不覆写 on_timeout。
+    提示消息是 ephemeral（仅发起者可见），ephemeral 消息的组件只能由
+    原交互用户使用，因此不需要 owner 校验。View 超时后按钮失效，
+    重发 /登记妈妈 即可获得新的提示。
     """
 
-    def __init__(self, owner: discord.Member | discord.User) -> None:
-        super().__init__(timeout=PROMPT_DELETE_AFTER)
-        self.owner = owner
+    def __init__(self) -> None:
+        super().__init__(timeout=PROMPT_VIEW_TIMEOUT)
 
     @discord.ui.button(label="登记/更新我的登记", style=discord.ButtonStyle.primary, emoji="👶")
     async def register_button(
         self, interaction: discord.Interaction, _: discord.ui.Button
     ) -> None:
-        if interaction.user.id != self.owner.id:
-            await interaction.response.send_message(
-                "这不是你的登记消息，请自己发送「登记妈妈」再操作。", ephemeral=True
-            )
-            return
         await interaction.response.send_modal(RegisterModal(interaction.user))
 
     @discord.ui.button(label="删除我的登记", style=discord.ButtonStyle.danger, emoji="🗑️")
     async def delete_button(
         self, interaction: discord.Interaction, _: discord.ui.Button
     ) -> None:
-        if interaction.user.id != self.owner.id:
-            await interaction.response.send_message(
-                "这不是你的登记消息，请自己发送「登记妈妈」再操作。", ephemeral=True
-            )
-            return
         try:
             deleted = delete_registration(interaction.user.id)
         except sqlite3.Error as exc:
@@ -209,7 +197,7 @@ class RegisterModal(discord.ui.Modal):
         await interaction.response.send_message(
             f"👶 已保存你的登记！区域：{region}"
             + (f"，备注：{note}" if note else "")
-            + "。其他人发送「找妈妈」可以看到你。",
+            + "。其他人发送 /找妈妈 可以看到你。",
             ephemeral=True,
         )
 
@@ -234,7 +222,7 @@ class MamaSelect(discord.ui.Select):
             print(f"[Mama] 查询登记失败：{exc}")
         if row is None:
             await interaction.response.send_message(
-                "这条登记已不存在（可能已被删除），请重新发送「找妈妈」刷新列表。",
+                "这条登记已不存在（可能已被删除），请重新发送 /找妈妈 刷新列表。",
                 ephemeral=True,
             )
             return
@@ -248,10 +236,10 @@ class MamaSelect(discord.ui.Select):
 
 
 class MamaSelectView(discord.ui.View):
-    """承载下拉菜单的容器，timeout 与列表消息存活时间对齐。"""
+    """承载下拉菜单的容器，timeout 与菜单有效期对齐。"""
 
     def __init__(self, rows: list[MamaRegistration]) -> None:
-        super().__init__(timeout=LIST_DELETE_AFTER)
+        super().__init__(timeout=LIST_VIEW_TIMEOUT)
         self.add_item(MamaSelect(_build_select_options(rows)))
 
 
@@ -271,8 +259,8 @@ def _build_select_options(rows: list[MamaRegistration]) -> list[discord.SelectOp
     return options
 
 
-def _render_list_chunks(rows: list[MamaRegistration]) -> list[str]:
-    """按区域分组渲染列表，超长时按 LIST_MAX_CHARS 贪心分块。"""
+def _render_list_text(rows: list[MamaRegistration]) -> str:
+    """按区域分组渲染登记列表成整段文本（分块交给 _split_text_chunks）。"""
     grouped: dict[str, list[MamaRegistration]] = {}
     for row in rows:
         grouped.setdefault(row.region, []).append(row)
@@ -286,73 +274,24 @@ def _render_list_chunks(rows: list[MamaRegistration]) -> list[str]:
     footer = f"\n共 {len(rows)} 人已登记。在下方菜单选择一位妈妈，获取联系提示。"
     if len(rows) > SELECT_MAX_OPTIONS:
         footer += f"（下拉菜单最多显示前 {SELECT_MAX_OPTIONS} 位，按登记时间）"
+    lines.append(footer)
+    return "\n".join(lines)
 
+
+def _split_text_chunks(text: str) -> list[str]:
+    """按 MESSAGE_MAX_CHARS 贪心分块，超长内容拆成多条消息（第一块 response、其余 followup）。"""
     chunks: list[str] = []
     current = ""
-    for line in lines:
+    for line in text.splitlines():
         candidate = f"{current}\n{line}" if current else line
-        if len(candidate) > LIST_MAX_CHARS:
+        if len(candidate) > MESSAGE_MAX_CHARS:
             chunks.append(current)
             current = line
         else:
             current = candidate
-    chunks.append(f"{current}\n{footer}" if current else footer)
+    if current:
+        chunks.append(current)
     return chunks
-
-
-async def _handle_register_prompt(message: discord.Message) -> None:
-    """处理「登记妈妈」：发一条带操作按钮的提示消息（60 秒自动删）。"""
-    try:
-        existing = get_registration(message.author.id)
-    except sqlite3.Error:
-        existing = None
-    if existing:
-        extra = (
-            f"\n你当前已登记：区域「{existing.region}」"
-            + (f"，备注「{existing.note}」" if existing.note else "")
-            + "。再次提交即覆盖更新。"
-        )
-    else:
-        extra = "\n还没有登记过，填写后即完成登记。"
-
-    await message.channel.send(
-        f"👶 {message.author.mention} 正在登记/更新妈妈信息！{extra}\n"
-        f"点击下方按钮操作，{PROMPT_DELETE_AFTER} 秒后本消息自动删除。",
-        view=RegisterPromptView(message.author),
-        delete_after=PROMPT_DELETE_AFTER,
-    )
-
-
-async def _handle_find(message: discord.Message) -> None:
-    """处理「找妈妈」：发按区域分组的登记列表 + 下拉菜单（120 秒自动删）。"""
-    try:
-        rows = get_all_registrations()
-    except sqlite3.Error as exc:
-        print(f"[Mama] 读取登记列表失败：{exc}")
-        await message.channel.send(
-            "读取登记列表失败，请稍后再试。", delete_after=LIST_DELETE_AFTER
-        )
-        return
-    if not rows:
-        await message.channel.send(
-            "当前还没有任何妈妈登记。想当妈妈的话，发送「登记妈妈」登记一下吧！",
-            delete_after=LIST_DELETE_AFTER,
-        )
-        return
-
-    # 列表不 ping 任何登记者（mention 仅渲染为 @名字，不产生通知）
-    no_mentions = discord.AllowedMentions.none()
-    chunks = _render_list_chunks(rows)
-    for chunk in chunks[:-1]:
-        await message.channel.send(
-            chunk, delete_after=LIST_DELETE_AFTER, allowed_mentions=no_mentions
-        )
-    await message.channel.send(
-        chunks[-1],
-        view=MamaSelectView(rows),
-        delete_after=LIST_DELETE_AFTER,
-        allowed_mentions=no_mentions,
-    )
 
 
 def _load_guide_text() -> str:
@@ -386,44 +325,121 @@ def _load_guide_text() -> str:
     return "\n".join(lines).strip()
 
 
-async def _handle_guide(message: discord.Message) -> None:
-    """处理「家庭组教程」：发送组家庭教程文字（120 秒自动删）。"""
-    try:
-        guide_text = _load_guide_text()
-    except OSError:
-        await message.channel.send(
-            "教程文件读取失败，请联系管理员。", delete_after=LIST_DELETE_AFTER
+def register_commands(bot: "SukakaBot") -> None:
+    """注册三个斜杠命令（由 bot.py 的 setup_hook 调用，on_ready 的 tree.sync 同步生效）。
+
+    全部响应都是 ephemeral：只有发起者本人可见，频道里不产生任何公开消息。
+    命令仅限 MAMA_CHANNEL_ID 频道内使用，其他频道里提示「仅限找妈妈频道」。
+    """
+
+    async def _deny_if_wrong_channel(interaction: discord.Interaction) -> bool:
+        """频道白名单检查：不在找妈妈频道时回复提示并返回 True。"""
+        if interaction.channel_id == MAMA_CHANNEL_ID:
+            return False
+        await interaction.response.send_message(
+            f"👶 mama 命令仅限 <#{MAMA_CHANNEL_ID}> 频道使用。", ephemeral=True
         )
-        return
-    await message.channel.send(
-        guide_text,
-        delete_after=LIST_DELETE_AFTER,
-        allowed_mentions=discord.AllowedMentions.none(),
+        return True
+
+    @bot.tree.command(
+        name="登记妈妈",
+        description="登记/更新/删除我的家庭组共享登记",
     )
+    async def register_mama(interaction: discord.Interaction) -> None:
+        if await _deny_if_wrong_channel(interaction):
+            return
+        try:
+            existing = get_registration(interaction.user.id)
+        except sqlite3.Error:
+            existing = None
+        if existing:
+            extra = (
+                f"\n你当前已登记：区域「{existing.region}」"
+                + (f"，备注「{existing.note}」" if existing.note else "")
+                + "。再次提交即覆盖更新。"
+            )
+        else:
+            extra = "\n还没有登记过，填写后即完成登记。"
 
+        await interaction.response.send_message(
+            f"👶 登记/更新妈妈信息！{extra}\n"
+            f"点击下方按钮操作（按钮 {PROMPT_VIEW_TIMEOUT // 60} 分钟内有效，"
+            "过期请重发 /登记妈妈）。",
+            view=RegisterPromptView(),
+            ephemeral=True,
+        )
 
-async def handle_mama_message(message: discord.Message) -> None:
-    """找妈妈频道消息入口（由 bot.py 的消息分发调用）。"""
-    # 防御性双检：正常情况下分发方已过滤
-    if message.channel.id != MAMA_CHANNEL_ID or message.author.bot:
-        return
-    content = message.content.strip()
-    if content == REGISTER_KEYWORD:
-        await _handle_register_prompt(message)
-    elif content == FIND_KEYWORD:
-        await _handle_find(message)
-    elif content == GUIDE_KEYWORD:
-        await _handle_guide(message)
-    # 其他消息静默忽略
+    @bot.tree.command(
+        name="找妈妈",
+        description="查看家庭组共享登记列表，找一位妈妈",
+    )
+    async def find_mama(interaction: discord.Interaction) -> None:
+        if await _deny_if_wrong_channel(interaction):
+            return
+        try:
+            rows = get_all_registrations()
+        except sqlite3.Error as exc:
+            print(f"[Mama] 读取登记列表失败：{exc}")
+            await interaction.response.send_message(
+                "读取登记列表失败，请稍后再试。", ephemeral=True
+            )
+            return
+        if not rows:
+            await interaction.response.send_message(
+                "当前还没有任何妈妈登记。想当妈妈的话，发 /登记妈妈 登记一下吧！",
+                ephemeral=True,
+            )
+            return
 
+        # 列表不 ping 任何登记者（mention 仅渲染为 @名字，不产生通知）
+        no_mentions = discord.AllowedMentions.none()
+        view = MamaSelectView(rows)
+        chunks = _split_text_chunks(_render_list_text(rows))
+        await interaction.response.send_message(
+            chunks[0],
+            view=view if len(chunks) == 1 else None,
+            ephemeral=True,
+            allowed_mentions=no_mentions,
+        )
+        for index, chunk in enumerate(chunks[1:], start=1):
+            # 后续分块走 followup；最后一块挂下拉菜单
+            await interaction.followup.send(
+                chunk,
+                view=view if index == len(chunks) - 1 else None,
+                ephemeral=True,
+                allowed_mentions=no_mentions,
+            )
 
-def start_mama(bot: "SukakaBot") -> None:
-    """启动找妈妈服务：建表（import 时已完成）+ 注册消息入口 + 打印启动日志。"""
-    bot.register_message_handler(MAMA_CHANNEL_ID, handle_mama_message)
+    @bot.tree.command(
+        name="家庭组教程",
+        description="查看 Gemini Pro 家庭组共享组建教程",
+    )
+    async def family_group_guide(interaction: discord.Interaction) -> None:
+        if await _deny_if_wrong_channel(interaction):
+            return
+        try:
+            guide_text = _load_guide_text()
+        except OSError:
+            await interaction.response.send_message(
+                "教程文件读取失败，请联系管理员。", ephemeral=True
+            )
+            return
+        chunks = _split_text_chunks(guide_text)
+        if not chunks:
+            await interaction.response.send_message("教程内容为空。", ephemeral=True)
+            return
+        no_mentions = discord.AllowedMentions.none()
+        await interaction.response.send_message(
+            chunks[0], ephemeral=True, allowed_mentions=no_mentions
+        )
+        for chunk in chunks[1:]:
+            await interaction.followup.send(
+                chunk, ephemeral=True, allowed_mentions=no_mentions
+            )
+
     print(
-        f"[Mama] 已启动，监听频道 {MAMA_CHANNEL_ID}，"
-        f"发送「{REGISTER_KEYWORD}」登记，发送「{FIND_KEYWORD}」查询，"
-        f"发送「{GUIDE_KEYWORD}」看教程，数据库 {DB_PATH}"
+        "[Mama] 斜杠命令已注册：/登记妈妈 /找妈妈 /家庭组教程"
+        f"（全部 ephemeral，仅发起者可见），数据库 {DB_PATH}"
     )
 
 
