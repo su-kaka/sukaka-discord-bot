@@ -41,6 +41,7 @@ from roulette.constants import (
     D6_KEYWORD,
     D6_RECHARGE_COST,
     DIVINITY_EXHAUST_CHANCE,
+    INFLATION_MIN_BALANCE,
     MARRY_FEE_PERCENT,
     MARRY_MIN_FEE,
     METEOR_DISSIPATE_CHANCE,
@@ -77,7 +78,7 @@ CARD_POOL: dict[str, tuple[str, str, int]] = {
     "taxevasion": ("偷税漏税", "下次取钱手续费为 0", 10),
     "notyet": ("时候未到", "梭哈归零时自动恢复 50 点", 10),
     "yourname": ("你的名字", "【超稀有道具】使用 `你的名字@某人` 和某人交换身体：双方交换所有额度/卡牌/银行存款，5 分钟后换回，期间双方不能再被你的名字影响", 1),
-    "inflation": ("通货膨胀", "若银行存在存款 > 3000 点的用户，所有人存款数值减半", 5),
+    "inflation": ("通货膨胀", f"若银行存在存款 > {INFLATION_MIN_BALANCE} 点的用户，所有人存款数值减半", 5),
     "depositking": ("存为王", "排行榜前十名用户自动存款一次（额度的 50% 存入银行）", 5),
     "sellout": ("变卖家产", f"随机卖掉若干种道具的全部数量（含蛇符咒/会员卡/流星雨/收藏家/诅咒之眼/神性/D6），每张 {GACHA_SELLOUT_PRICE} 点额度", 10),
     "offline": ("下线", f"【特殊道具】额度超过 {OFFLINE_MIN_QUOTA} 才能使用：额度重置为 {OFFLINE_RESET_QUOTA}，银行存款清空，无法被任何操作选择、无法抢红包、无法通过「{QUOTA_DROP_KEYWORD}」掉落额度，下次任意发言解除下线状态", 5),
@@ -1161,15 +1162,17 @@ async def _settle_depositking(message: discord.Message, client: httpx.AsyncClien
 
 
 async def _settle_inflation(message: discord.Message) -> None:
-    """通货膨胀：若存在存款 > 3000 的用户，所有人存款减半。"""
+    """通货膨胀：若存在存款 > INFLATION_MIN_BALANCE 的用户，所有人存款减半。"""
     accounts = get_all_accounts_with_min_balance(1)
     if not accounts:
         await message.channel.send("💸 银行空无一人，通货膨胀无效果。")
         return
 
-    has_rich = any(balance > 3000 for _, balance in accounts)
+    has_rich = any(balance > INFLATION_MIN_BALANCE for _, balance in accounts)
     if not has_rich:
-        await message.channel.send("💸 银行没有存款超过 3000 点的用户，通货膨胀无效果。")
+        await message.channel.send(
+            f"💸 银行没有存款超过 {INFLATION_MIN_BALANCE} 点的用户，通货膨胀无效果。"
+        )
         return
 
     for discord_id, balance in accounts:

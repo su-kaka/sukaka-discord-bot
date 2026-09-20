@@ -72,6 +72,7 @@ GACHA_SELFDESTRUCT_MAX_PERCENT = 50  # 自爆销毁比例上限（%）
 GACHA_ERROR_MIN = 1  # 错误卡重置额度下限
 GACHA_ERROR_MAX = 1000  # 错误卡重置额度上限
 GACHA_SELLOUT_PRICE = 200  # 变卖家产：每张道具卡牌卖价
+INFLATION_MIN_BALANCE = 5000  # 通货膨胀：触发所需的最低存款门槛（存在存款 > 此值的用户才生效）
 CURSE_EYE_DESTROY_CHANCE = 0.4444  # 诅咒之眼：每次诅咒后 44.44% 概率销毁
 CURSE_EYE_QUOTA_MIN = 0  # 诅咒之眼：目标额度随机变化下限
 CURSE_EYE_QUOTA_MAX = 1000  # 诅咒之眼：目标额度随机变化上限
