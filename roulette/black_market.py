@@ -69,8 +69,9 @@ BLACK_MARKET_POOL = sorted(
 )
 
 # 即时生效卡的结算函数映射（统一签名 (message, client, announce)）：
-# 黑市购买后立即静默结算，由黑市自己播报购买结果
-Settler = Callable[[discord.Message, httpx.AsyncClient, bool], Awaitable[None]]
+# 黑市购买后立即静默结算（announce=False），结算函数返回实际生效结果文本，
+# 由黑市在购买播报中展示
+Settler = Callable[[discord.Message, httpx.AsyncClient, bool], Awaitable[Optional[str]]]
 _INSTANT_SETTLERS: dict[str, Settler] = {
     "robinhood": lambda m, c, a: _settle_robinhood(m, c, announce=a),
     "selfdestruct": lambda m, c, a: _settle_selfdestruct(m, c, announce=a),
@@ -290,7 +291,7 @@ class BlackMarketView(discord.ui.View):
                 )
                 return
 
-            # 发货：即时生效卡立即静默结算，背包道具卡入包（与抽卡同款收藏家叠加规则）
+            # 发货：即时生效卡立即静默结算并播报实际生效结果，背包道具卡入包（与抽卡同款收藏家叠加规则）
             note = ""
             if card_key in INSTANT_SETTLE_CARDS:
                 settler = _INSTANT_SETTLERS.get(card_key)
@@ -299,7 +300,11 @@ class BlackMarketView(discord.ui.View):
                     _add_effect_on_draw(user.id, card_key)
                     note = "\n🎒 已放入背包。"
                 else:
-                    await settler(self.message_obj, self.client, False)
+                    effect_text = await settler(self.message_obj, self.client, False)
+                    if effect_text:
+                        note = f"\n{effect_text}"
+                    else:
+                        note = "\n⚠️ 生效结果未知，请自行确认。"
             else:
                 current, stacked = _add_effect_on_draw(user.id, card_key)
                 if stacked:
@@ -308,7 +313,8 @@ class BlackMarketView(discord.ui.View):
                     note = "\n🎒 已放入背包，可用 `我的卡牌` 查看。"
 
             result_text = (
-                f"🌒 {user.mention} 买下 **{name}**（-{price} 点，剩 {remaining} 件）\n{desc}{note}"
+                f"🌒 {user.mention} 买下 **{name}**（-{price} 点，剩 {remaining} 件）"
+                f"{note}"
             )
 
             # 卖光：重新上架并刷新界面，购买结果用 followup 播报
