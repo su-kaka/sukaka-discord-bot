@@ -15,6 +15,7 @@ import httpx
 
 from roulette.api import adjust_quota, query_quota, query_top_quota
 from roulette.bank import (
+    DB_PATH as BANK_DB_PATH,
     _add_balance,
     _get_balance,
     _set_balance,
@@ -99,16 +100,18 @@ UNIQUE_CARDS = {"snake", "membership", "meteor", "collector", "curseeye", "divin
 # 背包道具卡牌集合（D6 重置背包道具时的候选范围：卡池去掉唯一道具/即时结算卡/空白与许愿池）
 BAG_CARDS = set(CARD_POOL) - UNIQUE_CARDS - INSTANT_SETTLE_CARDS - WISHING_EXCLUDED_CARDS
 
-# 状态 buff 定义（诅咒/祝福/虚弱，不进背包，存 active_buffs 表）：key -> (名称, 描述)
+# 状态 buff 定义（诅咒/祝福/虚弱/仇恨不进背包，存 active_buffs 表）：key -> (名称, 描述)
 BUFF_POOL: dict[str, tuple[str, str]] = {
     "curse": ("诅咒", "下次抢劫必被反杀、决斗必输、梭哈必输，生效一次后解除"),
     "bless": ("祝福", "梭哈成功率提高到 75%（不与一念天堂叠加，一念天堂覆盖时保留）"),
     "weak": ("虚弱", "下次被抢劫必定被抢成功，生效一次后解除"),
+    # 仇恨：抢银行得手后附加，下次存钱被强制没收（存钱时消耗）
+    "hatred": ("仇恨", "抢银行得手后被地精银行盯上，下次存钱将被强制没收"),
 }
 
 
 def _init_db() -> None:
-    """建表：用户卡牌效果 + 蛇符咒唯一持有者。"""
+    """建表：用户卡牌效果 + 蛇符咒唯一持有者；并把仇恨从 bank.db 迁入 active_buffs。"""
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute(
             """
@@ -213,6 +216,17 @@ def _init_db() -> None:
             )
             """
         )
+
+    # 仇恨迁移：旧版存 bank.db 的 bank_hatred 表，现已并入 active_buffs（buff_key = "hatred"），迁移后删除旧表
+    try:
+        with sqlite3.connect(BANK_DB_PATH) as conn:
+            legacy_hatred_rows = conn.execute("SELECT discord_id FROM bank_hatred").fetchall()
+    except sqlite3.OperationalError:
+        legacy_hatred_rows = []
+    for (legacy_id,) in legacy_hatred_rows:
+        add_buff(legacy_id, "hatred")
+    with sqlite3.connect(BANK_DB_PATH) as conn:
+        conn.execute("DROP TABLE IF EXISTS bank_hatred")
 
 
 def set_offline(discord_id: int) -> None:

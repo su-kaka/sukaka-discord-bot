@@ -15,9 +15,8 @@ from roulette.bank import (
     _set_balance,
     get_richest_accounts,
     mark_heist_cooldown,
-    set_hatred,
 )
-from roulette.gacha import consume_effect
+from roulette.gacha import add_buff, consume_effect
 from roulette.constants import (
     BANK_HEIST_AUTO_INTERVAL_SECONDS,
     BANK_HEIST_BASE_SUCCESS,
@@ -279,8 +278,8 @@ class BankHeistView(discord.ui.View):
                 member_shares.append(
                     f"{user.mention} 返还 {cost} + 分得 {share} = **{total_return} 点**（发放失败，请联系管理员）"
                 )
-            # 标记仇恨
-            set_hatred(user.id)
+            # 标记仇恨（状态 buff，存 gacha.db 的 active_buffs 表）
+            add_buff(user.id, "hatred")
 
         # 发送结果
         result_text = (
@@ -289,7 +288,7 @@ class BankHeistView(discord.ui.View):
             f"目标明细：\n" + "\n".join(target_details) + "\n"
             f"销毁 {destroy_share} 点，银行手续费 {bank_share} 点\n"
             f"队员分配：\n" + "\n".join(member_shares) + "\n"
-            f"⚠️ 所有队员已被标记仇恨，下次存钱将被没收！"
+            f"⚠️ 所有队员已被标记仇恨，下次存钱将被没收（用「我的卡牌」可查看）！"
         )
         await self.message.channel.send(result_text)
 

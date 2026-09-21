@@ -33,7 +33,7 @@ DB_PATH = Path(os.getenv("BANK_DB", BANK_DB))
 
 
 def _init_db() -> None:
-    """建表：用户银行存款 + 仇恨状态 + 抢劫冷却。"""
+    """建表：用户银行存款 + 抢劫冷却。仇恨已并入 gacha.db 的 active_buffs 状态 buff 表。"""
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute(
             """
@@ -42,14 +42,6 @@ def _init_db() -> None:
                 balance INTEGER NOT NULL DEFAULT 0,
                 created_at REAL NOT NULL,
                 updated_at REAL NOT NULL
-            )
-            """
-        )
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS bank_hatred (
-                discord_id INTEGER PRIMARY KEY,
-                created_at REAL NOT NULL
             )
             """
         )
@@ -142,35 +134,6 @@ def get_richest_accounts(min_balance: int, limit: int) -> list[tuple[int, int]]:
             (min_balance, limit),
         ).fetchall()
     return rows
-
-
-def set_hatred(discord_id: int) -> None:
-    """标记仇恨状态。"""
-    now = sqlite3.connect(DB_PATH).execute("SELECT strftime('%s', 'now')").fetchone()[0]
-    with sqlite3.connect(DB_PATH) as conn:
-        conn.execute(
-            "INSERT OR REPLACE INTO bank_hatred (discord_id, created_at) VALUES (?, ?)",
-            (discord_id, now),
-        )
-
-
-def has_hatred(discord_id: int) -> bool:
-    """是否有仇恨状态。"""
-    with sqlite3.connect(DB_PATH) as conn:
-        row = conn.execute(
-            "SELECT 1 FROM bank_hatred WHERE discord_id = ?",
-            (discord_id,),
-        ).fetchone()
-    return row is not None
-
-
-def clear_hatred(discord_id: int) -> None:
-    """清除仇恨状态。"""
-    with sqlite3.connect(DB_PATH) as conn:
-        conn.execute(
-            "DELETE FROM bank_hatred WHERE discord_id = ?",
-            (discord_id,),
-        )
 
 
 def mark_heist_cooldown(discord_id: int) -> None:
@@ -334,10 +297,12 @@ async def handle_deposit(message: discord.Message, client: httpx.AsyncClient) ->
         else:
             loan_note = f"\n💳 偿还贷款 **{repaid} 点** 给 {lender_display}（已存入其银行账户），剩余欠款 **{remaining_loan} 点**。"
 
-    # 仇恨没收
+    # 仇恨没收（仇恨为状态 buff，存 gacha.db 的 active_buffs 表）
+    from roulette.gacha import has_buff, remove_buff
+
     hatred_note = ""
-    if has_hatred(message.author.id):
-        clear_hatred(message.author.id)
+    if has_buff(message.author.id, "hatred"):
+        remove_buff(message.author.id, "hatred")
         hatred_note = "\n🔥 仇恨解除！本次存款被强制没收！"
         new_balance = _get_balance(message.author.id)
     elif remaining_deposit > 0:
