@@ -135,18 +135,18 @@ LOTTERY_DB = "lottery.db"
 
 RULES_KEYWORD = "规则"
 
-BIG_RED_PACKET_INTERVAL_SECONDS = 600  # 机器人每 10 分钟发一次大红包
+BIG_RED_PACKET_INTERVAL_SECONDS = 300  # 机器人每 5 分钟发一次大红包
 BIG_RED_PACKET_POOL = 500  # 奖池 500 点
 BIG_RED_PACKET_OPTIONS_COUNT = 3  # 人机验证选项数（仅 1 个正确）
 
 # 掉落
 QUOTA_DROP_KEYWORD = "来财"  # 触发掉落的关键词
 QUOTA_DROP_DB = "quota_drops.db"  # 掉落冷却数据库
-QUOTA_DROP_MAX = 50  # 单次掉落点数上限
-QUOTA_DROP_ZERO_CHANCE = 0.3  # 掉落 0 点的概率（0-1），剩余概率掉 1-50 均匀随机
+QUOTA_DROP_MAX = 100  # 单次掉落点数上限
+QUOTA_DROP_ZERO_CHANCE = 0.3  # 掉落 0 点的概率（0-1），剩余概率掉 1-100 均匀随机
 QUOTA_DROP_DEDUCT_CHANCE = 0.1  # 触发扣减事件的概率（0-1）
 QUOTA_DROP_DEDUCT_MIN = 1  # 单次扣减点数下限
-QUOTA_DROP_DEDUCT_MAX = 50  # 单次扣减点数上限
+QUOTA_DROP_DEDUCT_MAX = 100  # 单次扣减点数上限
 QUOTA_DROP_COOLDOWN_MIN_SECONDS = 30  # 单用户掉落冷却下限（秒）
 QUOTA_DROP_COOLDOWN_MAX_SECONDS = 180  # 单用户掉落冷却上限（秒）
 QUOTA_DROP_NOTIFY_DELETE_AFTER = 10  # 掉落通知自动删除时间（秒）
