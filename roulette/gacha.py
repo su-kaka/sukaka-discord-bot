@@ -15,7 +15,6 @@ import httpx
 
 from roulette.api import adjust_quota, query_quota, query_top_quota
 from roulette.bank import (
-    DB_PATH as BANK_DB_PATH,
     _add_balance,
     _get_balance,
     _set_balance,
@@ -111,7 +110,7 @@ BUFF_POOL: dict[str, tuple[str, str]] = {
 
 
 def _init_db() -> None:
-    """建表：用户卡牌效果 + 蛇符咒唯一持有者；并把仇恨从 bank.db 迁入 active_buffs。"""
+    """建表：用户卡牌效果 + 蛇符咒唯一持有者。"""
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute(
             """
@@ -216,17 +215,6 @@ def _init_db() -> None:
             )
             """
         )
-
-    # 仇恨迁移：旧版存 bank.db 的 bank_hatred 表，现已并入 active_buffs（buff_key = "hatred"），迁移后删除旧表
-    try:
-        with sqlite3.connect(BANK_DB_PATH) as conn:
-            legacy_hatred_rows = conn.execute("SELECT discord_id FROM bank_hatred").fetchall()
-    except sqlite3.OperationalError:
-        legacy_hatred_rows = []
-    for (legacy_id,) in legacy_hatred_rows:
-        add_buff(legacy_id, "hatred")
-    with sqlite3.connect(BANK_DB_PATH) as conn:
-        conn.execute("DROP TABLE IF EXISTS bank_hatred")
 
 
 def set_offline(discord_id: int) -> None:
