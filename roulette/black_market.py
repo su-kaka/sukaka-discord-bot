@@ -204,7 +204,6 @@ class BlackMarketView(discord.ui.View):
             button = discord.ui.Button(
                 label=f"{name} {price}点",
                 style=discord.ButtonStyle.primary,
-                emoji="🃏",
                 row=index // 5,
             )
 
