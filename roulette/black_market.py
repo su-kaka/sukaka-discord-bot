@@ -164,18 +164,16 @@ def _return_stock(card_key: str) -> None:
 
 
 def _shelf_text(rows: list[tuple[str, int, int]], restocked: bool = False) -> str:
-    """组装货架文案。"""
-    header = "🌒 **黑 市**"
+    """组装货架文案（紧凑单行制，不展示卡牌描述）。"""
+    header = "🌒 **黑市**"
     if restocked:
         header += "（新货上架！）"
     lines = [header]
     for card_key, price, stock in rows:
-        name, desc, _ = CARD_POOL.get(card_key, (card_key, "", 0))
-        tag = "⚡即时" if card_key in INSTANT_SETTLE_CARDS else "🎒背包"
-        lines.append(f"• **{name}** — {price} 点/张 ×{stock} 件【{tag}】\n  └ {desc}")
-    lines.append(
-        "🃏 不卖唯一道具、空白、许愿池、虚弱与自爆；背包道具需持有「收藏家」才能叠加数量；全部卖光自动上新。点击按钮购买一件。"
-    )
+        name, _, _ = CARD_POOL.get(card_key, (card_key, "", 0))
+        tag = "⚡" if card_key in INSTANT_SETTLE_CARDS else "🎒"
+        lines.append(f"• {name} {price}点×{stock} {tag}")
+    lines.append("🃏 点击购买；卖光自动上新；背包道具需「收藏家」叠加")
     return "\n".join(lines)
 
 
@@ -310,8 +308,7 @@ class BlackMarketView(discord.ui.View):
                     note = "\n🎒 已放入背包，可用 `我的卡牌` 查看。"
 
             result_text = (
-                f"🌒 {user.mention} 花 **{price} 点** 买下 **{name}**"
-                f"（该商品剩余 {remaining} 件）！\n✨ {desc}{note}"
+                f"🌒 {user.mention} 买下 **{name}**（-{price} 点，剩 {remaining} 件）\n{desc}{note}"
             )
 
             # 卖光：重新上架并刷新界面，购买结果用 followup 播报
