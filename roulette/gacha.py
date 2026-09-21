@@ -1042,9 +1042,13 @@ async def _get_top_quota_excluded(
     return await query_top_quota(client, _get_exclude_names(message))
 
 
-async def _settle_weak(message: discord.Message) -> None:
-    """虚弱：立即附加虚弱状态 buff（下次被抢劫必定被抢成功），不进背包。"""
+async def _settle_weak(message: discord.Message, announce: bool = True) -> None:
+    """虚弱：立即附加虚弱状态 buff（下次被抢劫必定被抢成功），不进背包。
+
+    announce=False 时不播报（黑市购买时由调用方提示）。"""
     add_buff(message.author.id, "weak")
+    if not announce:
+        return
     name, desc, _ = CARD_POOL["weak"]
     await message.channel.send(
         f"🤒 {message.author.mention} 抽中 **{name}**！{desc}\n"
@@ -1052,8 +1056,14 @@ async def _settle_weak(message: discord.Message) -> None:
     )
 
 
-async def _settle_error(message: discord.Message, client: httpx.AsyncClient) -> None:
-    """错误：将额度重置为 1-1000 之间的随机值。"""
+async def _settle_error(
+    message: discord.Message,
+    client: httpx.AsyncClient,
+    announce: bool = True,
+) -> None:
+    """错误：将额度重置为 1-1000 之间的随机值。
+
+    announce=False 时不播报（黑市购买时由调用方提示）。"""
     quota = await query_quota(client, message.author.name)
     if quota is None:
         await message.channel.send("🎴 查询额度失败，请稍后再试。")
@@ -1070,14 +1080,21 @@ async def _settle_error(message: discord.Message, client: httpx.AsyncClient) -> 
         await message.channel.send("🎴 额度重置失败，请联系管理员。")
         return
 
-    await message.channel.send(
-        f"🎴 {message.author.mention} 抽中 **错误**！\n"
-        f"💥 额度从 **{quota} 点** 重置为 **{new_quota} 点**！"
-    )
+    if announce:
+        await message.channel.send(
+            f"🎴 {message.author.mention} 抽中 **错误**！\n"
+            f"💥 额度从 **{quota} 点** 重置为 **{new_quota} 点**！"
+        )
 
 
-async def _settle_robinhood(message: discord.Message, client: httpx.AsyncClient) -> None:
-    """劫富济贫：排名前十的用户随机分你他们额度的 1%-10%。"""
+async def _settle_robinhood(
+    message: discord.Message,
+    client: httpx.AsyncClient,
+    announce: bool = True,
+) -> None:
+    """劫富济贫：排名前十的用户随机分你他们额度的 1%-10%。
+
+    announce=False 时不播报（黑市购买时由调用方提示）。"""
     top_users = await _get_top_quota_excluded(message, client)
     if not top_users:
         await message.channel.send("🎴 劫富济贫失败：暂无排行数据。")
@@ -1122,7 +1139,8 @@ async def _settle_robinhood(message: discord.Message, client: httpx.AsyncClient)
         lines.append(f"🎉 共劫富济贫 **{total_gain} 点**！")
     else:
         lines.append("💨 前十名都身无分文，一无所获。")
-    await message.channel.send("\n".join(lines))
+    if announce:
+        await message.channel.send("\n".join(lines))
 
 
 class SelfDestructPacketView(PacketView):
@@ -1144,8 +1162,14 @@ class SelfDestructPacketView(PacketView):
         )
 
 
-async def _settle_depositking(message: discord.Message, client: httpx.AsyncClient) -> None:
-    """存为王：排行榜前十名用户自动存款一次（额度的 50% 存入银行）。"""
+async def _settle_depositking(
+    message: discord.Message,
+    client: httpx.AsyncClient,
+    announce: bool = True,
+) -> None:
+    """存为王：排行榜前十名用户自动存款一次（额度的 50% 存入银行）。
+
+    announce=False 时不播报（黑市购买时由调用方提示）。"""
     top_users = await _get_top_quota_excluded(message, client)
     if not top_users:
         await message.channel.send("🏦 存为王失败：暂无排行数据。")
@@ -1190,33 +1214,45 @@ async def _settle_depositking(message: discord.Message, client: httpx.AsyncClien
 
     if deposited == 0:
         lines.append("💨 前十名都身无分文，无人存款。")
-    await message.channel.send("\n".join(lines))
+    if announce:
+        await message.channel.send("\n".join(lines))
 
 
-async def _settle_inflation(message: discord.Message) -> None:
-    """通货膨胀：若存在存款 > INFLATION_MIN_BALANCE 的用户，所有人存款减半。"""
+async def _settle_inflation(message: discord.Message, announce: bool = True) -> None:
+    """通货膨胀：若存在存款 > INFLATION_MIN_BALANCE 的用户，所有人存款减半。
+
+    announce=False 时不播报（黑市购买时由调用方提示）。"""
     accounts = get_all_accounts_with_min_balance(1)
     if not accounts:
-        await message.channel.send("💸 银行空无一人，通货膨胀无效果。")
+        if announce:
+            await message.channel.send("💸 银行空无一人，通货膨胀无效果。")
         return
 
     has_rich = any(balance > INFLATION_MIN_BALANCE for _, balance in accounts)
     if not has_rich:
-        await message.channel.send(
-            f"💸 银行没有存款超过 {INFLATION_MIN_BALANCE} 点的用户，通货膨胀无效果。"
-        )
+        if announce:
+            await message.channel.send(
+                f"💸 银行没有存款超过 {INFLATION_MIN_BALANCE} 点的用户，通货膨胀无效果。"
+            )
         return
 
     for discord_id, balance in accounts:
         _set_balance(discord_id, balance // 2)
 
-    await message.channel.send(
-        f"💸 {message.author.mention} 抽中 **通货膨胀**！所有人存款减半！"
-    )
+    if announce:
+        await message.channel.send(
+            f"💸 {message.author.mention} 抽中 **通货膨胀**！所有人存款减半！"
+        )
 
 
-async def _settle_sellout(message: discord.Message, client: httpx.AsyncClient) -> None:
-    """变卖家产：从背包随机选出若干种道具，每种卖掉全部持有数量，每张 100 点额度。"""
+async def _settle_sellout(
+    message: discord.Message,
+    client: httpx.AsyncClient,
+    announce: bool = True,
+) -> None:
+    """变卖家产：从背包随机选出若干种道具，每种卖掉全部持有数量，每张 100 点额度。
+
+    announce=False 时不播报（黑市购买时由调用方提示）。"""
     # 候选道具：背包卡牌 (key, 持有数量) + 唯一道具（每件 1 个）
     items: list[tuple[str, int, bool]] = [
         (card_key, remaining, False) for card_key, remaining in get_user_cards(message.author.id)
@@ -1275,14 +1311,21 @@ async def _settle_sellout(message: discord.Message, client: httpx.AsyncClient) -
         await message.channel.send("🏷️ 发放额度失败，请联系管理员（卡牌已变卖）。")
         return
 
-    await message.channel.send(
-        f"🏷️ {message.author.mention} 抽中 **变卖家产**！\n"
-        f"卖掉 {len(selected)} 种道具，获得 **{total} 点**额度：\n" + "\n".join(sold_lines)
-    )
+    if announce:
+        await message.channel.send(
+            f"🏷️ {message.author.mention} 抽中 **变卖家产**！\n"
+            f"卖掉 {len(selected)} 种道具，获得 **{total} 点**额度：\n" + "\n".join(sold_lines)
+        )
 
 
-async def _settle_selfdestruct(message: discord.Message, client: httpx.AsyncClient) -> None:
-    """自爆：额度归零，随机销毁 25%-50%，剩余生成红包。"""
+async def _settle_selfdestruct(
+    message: discord.Message,
+    client: httpx.AsyncClient,
+    announce: bool = True,
+) -> None:
+    """自爆：额度归零，随机销毁 25%-50%，剩余生成红包。
+
+    announce=False 时不播报（黑市购买时由调用方提示）。"""
     quota = await query_quota(client, message.author.name)
     if quota is None:
         await message.channel.send("💥 查询额度失败，请稍后再试。")
@@ -1301,10 +1344,11 @@ async def _settle_selfdestruct(message: discord.Message, client: httpx.AsyncClie
     destroyed = int(quota * destroy_percent / 100)
     pool = quota - destroyed
 
-    await message.channel.send(
-        f"💥 {message.author.mention} 抽中 **自爆**！额度 **{quota} 点** 已归零！\n"
-        f"销毁 **{destroyed} 点**（{destroy_percent}%），剩余 **{pool} 点** 生成红包！"
-    )
+    if announce:
+        await message.channel.send(
+            f"💥 {message.author.mention} 抽中 **自爆**！额度 **{quota} 点** 已归零！\n"
+            f"销毁 **{destroyed} 点**（{destroy_percent}%），剩余 **{pool} 点** 生成红包！"
+        )
 
     if pool <= 0:
         return

@@ -92,6 +92,17 @@ OFFLINE_KEYWORD = "下线"
 OFFLINE_MIN_QUOTA = 2000  # 使用下线卡牌的最低额度要求
 OFFLINE_RESET_QUOTA = 400  # 下线后额度重置值
 
+BLACK_MARKET_KEYWORD = "黑市"
+BLACK_MARKET_DB = "black_market.db"
+BLACK_MARKET_SLOTS = 5  # 黑市货架商品种数
+BLACK_MARKET_PRICE_MIN = 100  # 单件价格下限
+BLACK_MARKET_PRICE_MAX = 500  # 单件价格上限
+BLACK_MARKET_STOCK_MIN = 1  # 单种商品数量下限
+BLACK_MARKET_STOCK_MAX = 5  # 单种商品数量上限
+BLACK_MARKET_TIMEOUT_SECONDS = 60  # 黑市界面超时（秒）
+BLACK_MARKET_EXCLUDED_CARDS = {"inflation", "depositking", "weak", "blank", "wishingpool", "selfdestruct"}  # 黑市不出售的卡牌（通货膨胀/存为王/虚弱/空白/许愿池/自爆）
+BLACK_MARKET_EXCLUDED_KINDS = frozenset({"unique"})  # 黑市不出售的物品种类（unique=唯一道具）
+
 BANK_KEYWORD = "存钱"
 BANK_WITHDRAW_KEYWORD = "取钱"
 BANK_BALANCE_KEYWORD = "我的钱"

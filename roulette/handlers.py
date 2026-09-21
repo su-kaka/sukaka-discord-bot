@@ -26,6 +26,7 @@ from roulette.constants import (
     BEG_TIMEOUT_SECONDS,
     BIG_RED_PACKET_INTERVAL_SECONDS,
     BIG_RED_PACKET_POOL,
+    BLACK_MARKET_KEYWORD,
     BANK_BALANCE_KEYWORD,
     BANK_HEIST_AUTO_INTERVAL_SECONDS,
     BANK_HEIST_KEYWORD,
@@ -71,6 +72,7 @@ from roulette.constants import (
 )
 from roulette.bank import handle_bank_balance, handle_deposit, handle_loan, handle_withdraw
 from roulette.bank_heist import auto_heist_loop, handle_bank_heist
+from roulette.black_market import handle_black_market
 from roulette.bless import handle_bless
 from roulette.curse import handle_curse
 from roulette.dice_game import DiceGame
@@ -264,6 +266,11 @@ def start_roulette(bot: "SukakaBot") -> None:
             await handle_my_cards(message)
             return
 
+        # 黑市：随机上架卡牌，点击购买
+        if content == BLACK_MARKET_KEYWORD:
+            await handle_black_market(message, client)
+            return
+
         # D6：持有者掷骰重置身上的道具（数量不变、种类改变）
         if content == D6_KEYWORD:
             await handle_d6(message, client)
@@ -312,6 +319,7 @@ def start_roulette(bot: "SukakaBot") -> None:
                 "🔮 **诅咒**：押 10 点，被诅咒者下次抢劫必被反杀、决斗必输、梭哈必输。\n"
                 "🎰 **梭哈**：押全部额度，50% 翻倍（一念天堂翻四倍），成功后扣 20% 手续费，失败清零。\n"
                 "🎴 **抽卡**：押额度的 10%（最少 10 点），40% 空白，其余获得随机魔法卡或者道具。\n"
+                "🌒 **黑市**：随机上架 5 种卡牌，价格 100-500 点随机、库存 1-5 件随机，点击购买；卖光后自动上新，不卖唯一道具、空白、许愿池、虚弱与自爆，背包道具需「收藏家」才能叠加数量。\n"
                 "🏦 **地精银行**：发送「存钱」押 50%（最低 10 点），发送「取钱」随机扣 1%-50% 手续费。存款超 1000 点解锁普通安保（防抢劫），超 2000 点解锁皇家安保（防抢劫/诱惑/劫富济贫）。\n"
                 "💳 **贷款**：发送「贷款」随机向存款 ≥ 100 点的用户借款 50 点，需还 60 点（借款账号得 55 点：50 本金 + 5 利息，5 点手续费销毁）。未还清前无法再次贷款，存钱时优先偿还贷款。\n"
                 "🏦💰 **抢银行**：三人组队抢银行，随机选 1-10 个存款 ≥ 500 的目标，装备总和决定成功率（跑刀+5%/起枪+15%/全甲+30%），成功返还投入+收益，失败损失投入。\n"

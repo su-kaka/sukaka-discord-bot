@@ -33,6 +33,7 @@ start_roulette(bot)
 | `curse.py` | 88 | 诅咒：10 点使目标下次抢劫/决斗/梭哈必输；诅咒之眼持有者叠加额度重置效果 |
 | `bless.py` | 50 | 祝福：神性持有者专属，被祝福者梭哈成功率提高到 75% |
 | `gacha.py` | 1006 | 抽卡：卡池定义、效果存取、下线/身体交换/诱惑等特殊玩法 |
+| `black_market.py` | 300 | 黑市：随机上架 5 种卡牌，点击购买，卖光自动重置 |
 | `bank.py` | 411 | 地精银行：存款、安保、贷款 |
 | `bank_heist.py` | 371 | 抢银行：三人组队选装备 |
 | `lottery.py` | 107 | 彩票：10 点一张，5% 赢奖池 |
@@ -72,7 +73,15 @@ start_roulette(bot)
 - **诅咒之眼**（`curse.py` 的 `_settle_curse_eye`）：持有者发送 `诅咒 @某人` 时**在普通诅咒流程（押 10 点、必输 debuff）正常结算之后额外叠加**——目标额度重置为 `CURSE_EYE_QUOTA_MIN`-`CURSE_EYE_QUOTA_MAX`（0-1000）随机值，每次使用 `CURSE_EYE_DESTROY_CHANCE`（44.44%）概率销毁（`clear_curse_eye_holder`）。效果**无法被借刀杀人反弹**（借刀杀人只转嫁普通诅咒）；持有者**无视诅咒冷却**（不检查也不写入 `curse_cooldowns`），可发送 `诅咒 @自己`（不押点，仅诅咒之眼效果，不入诅咒名单）。普通诅咒逻辑不变，未持有者无此效果。
 - 身体交换（你的名字卡）存 `body_swaps` 表，`restore_body_swaps` 后台任务在 5 分钟后换回。
 - **循环依赖规避惯例**：`packet_base.py`、`quota_drop.py` 等在函数体内延迟 `from roulette.gacha import ...`，因为 gacha 又 import 了 packet_base。新增跨模块引用时沿用此惯例。
-- 立即结算型卡牌（劫富济贫/自爆/错误/通货膨胀/存为王/变卖家产/虚弱）不写 `gacha_effects`，抽到即触发。**虚弱**抽中立即附加 `weak` 状态 buff（存 `active_buffs` 表），`rob.py` 用 `remove_buff(target, "weak")` 消耗：被抢劫必定被抢成功。变卖家产**从背包随机选出若干种道具，每种卖掉全部持有数量**（唯一道具卖掉后清除持有记录），按 `GACHA_SELLOUT_PRICE`（100 点/张）发放额度。
+- 立即结算型卡牌（劫富济贫/自爆/错误/通货膨胀/存为王/变卖家产/虚弱）不写 `gacha_effects`，抽到即触发。**虚弱**抽中立即附加 `weak` 状态 buff（存 `active_buffs` 表），`rob.py` 用 `remove_buff(target, "weak")` 消耗：被抢劫必定被抢成功。变卖家产**从背包随机选出若干种道具，每种卖掉全部持有数量**（唯一道具卖掉后清除持有记录），按 `GACHA_SELLOUT_PRICE`（100 点/张）发放额度。各即时结算函数均带可选 `announce` 参数：黑市购买即时生效卡时传 `announce=False` 静默结算，由黑市自己播报购买结果。
+
+## 黑市（black_market.py）
+
+- 发送 `黑市`（`BLACK_MARKET_KEYWORD`）拉出购买界面：全服共享货架随机上架 `BLACK_MARKET_SLOTS`（10）种卡牌，价格 `BLACK_MARKET_PRICE_MIN`-`BLACK_MARKET_PRICE_MAX`（100-500）随机、库存 `BLACK_MARKET_STOCK_MIN`-`BLACK_MARKET_STOCK_MAX`（1-5）随机。
+- **出售范围**：背包道具卡（`BAG_CARDS`）+ 即时生效卡（`INSTANT_SETTLE_CARDS`）− 种类排除名单（`BLACK_MARKET_EXCLUDED_KINDS`：`unique` 唯一道具）− 卡牌排除名单（`BLACK_MARKET_EXCLUDED_CARDS`：空白/许愿池/通货膨胀/存为王/虚弱/自爆）。即：**不卖唯一道具、空白、许愿池、虚弱、自爆，即时生效卡中不出现通货膨胀与存为王**。
+- **购买流程**：每种在售卡牌一个按钮 → 已持有且未持有收藏家的背包道具直接拦截（不扣库存不扣额度，提示需「收藏家」才能叠加）→ `UPDATE ... WHERE stock > 0` 原子扣库存（并发只有一个成功）→ 扣额度（不足则回补库存）→ 发货：即时生效卡静默结算（`announce=False`），背包卡 `_add_effect_on_draw` 入包（与抽卡同款收藏家叠加规则）。
+- **卖光重置**：货架全部售罄后自动 `_restock()` 重新随机 10 种并刷新界面；货架存 `black_market.db` 的 `black_market_shelf` 表，重启不丢失。
+- 界面超时 `BLACK_MARKET_TIMEOUT_SECONDS`（300 秒）后移除按钮，货架库存保留。
 
 ## 通用红包视图（packet_base.py）
 
@@ -94,6 +103,7 @@ start_roulette(bot)
 | DB | 表 | 说明 |
 | --- | --- | --- |
 | `gacha.db` | gacha_effects / snake_charm_holder / membership_card_holder / meteor_shower_holder / collector_card_holder / curse_eye_holder / divinity_holder / d6_holder / active_buffs / body_swaps / offline_users | 卡牌效果、唯一道具、状态 buff 与特殊状态 |
+| `black_market.db` | black_market_shelf | 黑市货架（全服共享，卖光自动重置） |
 | `bank.db` | bank_accounts / bank_heist_cooldowns 等 | 银行存款与抢劫 |
 | `lottery.db` | lottery_pool | 彩票奖池（单行） |
 | `quota_drops.db` | drop_cooldowns | 掉落冷却 |
