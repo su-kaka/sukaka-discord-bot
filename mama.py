@@ -21,6 +21,10 @@ REQUIRED_ROLE_IDS = (
     1383835973384802396,
     1134611078203052122,
 )
+# 拥有以下任一身份组的用户禁止使用 /找妈妈（优先于上方白名单）
+BLOCKED_ROLE_IDS = (
+    1271383429346365450,
+)
 ROLE_CLAIM_LINK = (
     "https://discord.com/channels/1134557553011998840"
     "/1383603412956090578/1536717951170773155"
@@ -352,13 +356,20 @@ def register_commands(bot: "SukakaBot") -> None:
         return True
 
     async def _deny_if_missing_role(interaction: discord.Interaction) -> bool:
-        """身份组检查：/找妈妈 需要先领取指定身份组之一，缺组时提示领取链接。"""
+        """身份组检查：被拉黑身份组直接拒绝；需领取指定身份组之一，缺组时提示领取链接。"""
         member = interaction.user
         # 频道限 guild 内使用，正常都是 Member；防御 DM/异常场景下拿不到身份组
-        if isinstance(member, discord.Member) and any(
-            member.get_role(role_id) for role_id in REQUIRED_ROLE_IDS
-        ):
-            return False
+        if isinstance(member, discord.Member):
+            # 黑名单优先：命中即拒绝，不再看白名单
+            if any(member.get_role(role_id) for role_id in BLOCKED_ROLE_IDS):
+                await interaction.response.send_message(
+                    "⚠️ 你已被警告，无法使用 /找妈妈。\n"
+                    "如有疑问请联系管理员。",
+                    ephemeral=True,
+                )
+                return True
+            if any(member.get_role(role_id) for role_id in REQUIRED_ROLE_IDS):
+                return False
         await interaction.response.send_message(
             "👶 使用 /找妈妈 需要先领取对应身份组。\n"
             f"请到这里领取：{ROLE_CLAIM_LINK}",
