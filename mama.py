@@ -16,6 +16,13 @@ if TYPE_CHECKING:
 
 MAMA_CHANNEL_ID = 1455038454772531311  # 只在这个频道响应 mama 斜杠命令
 
+# /找妈妈 需要持有的身份组；没有则引导去领频道消息处领取
+REQUIRED_ROLE_ID = 1383835973384802396
+ROLE_CLAIM_LINK = (
+    "https://discord.com/channels/1134557553011998840"
+    "/1383603412956090578/1536717951170773155"
+)
+
 # 「/家庭组教程」发送 docs/family-group-guide.md 的渲染结果，改教程只改那一个文件
 GUIDE_FILE = Path(os.getenv("MAMA_GUIDE_FILE", "docs/family-group-guide.md"))
 
@@ -341,6 +348,19 @@ def register_commands(bot: "SukakaBot") -> None:
         )
         return True
 
+    async def _deny_if_missing_role(interaction: discord.Interaction) -> bool:
+        """身份组检查：/找妈妈 需要先领取指定身份组，缺组时提示领取链接。"""
+        member = interaction.user
+        # 频道限 guild 内使用，正常都是 Member；防御 DM/异常场景下拿不到身份组
+        if isinstance(member, discord.Member) and member.get_role(REQUIRED_ROLE_ID):
+            return False
+        await interaction.response.send_message(
+            "👶 使用 /找妈妈 需要先领取对应身份组。\n"
+            f"请到这里领取：{ROLE_CLAIM_LINK}",
+            ephemeral=True,
+        )
+        return True
+
     @bot.tree.command(
         name="登记妈妈",
         description="登记/更新/删除我的家庭组共享登记",
@@ -375,6 +395,8 @@ def register_commands(bot: "SukakaBot") -> None:
     )
     async def find_mama(interaction: discord.Interaction) -> None:
         if await _deny_if_wrong_channel(interaction):
+            return
+        if await _deny_if_missing_role(interaction):
             return
         try:
             rows = get_all_registrations()
