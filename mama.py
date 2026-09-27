@@ -16,8 +16,11 @@ if TYPE_CHECKING:
 
 MAMA_CHANNEL_ID = 1455038454772531311  # 只在这个频道响应 mama 斜杠命令
 
-# /找妈妈 需要持有的身份组；没有则引导去领频道消息处领取
-REQUIRED_ROLE_ID = 1383835973384802396
+# /找妈妈 需要持有以下身份组之一；没有则引导去领频道消息处领取
+REQUIRED_ROLE_IDS = (
+    1383835973384802396,
+    1134611078203052122,
+)
 ROLE_CLAIM_LINK = (
     "https://discord.com/channels/1134557553011998840"
     "/1383603412956090578/1536717951170773155"
@@ -349,10 +352,12 @@ def register_commands(bot: "SukakaBot") -> None:
         return True
 
     async def _deny_if_missing_role(interaction: discord.Interaction) -> bool:
-        """身份组检查：/找妈妈 需要先领取指定身份组，缺组时提示领取链接。"""
+        """身份组检查：/找妈妈 需要先领取指定身份组之一，缺组时提示领取链接。"""
         member = interaction.user
         # 频道限 guild 内使用，正常都是 Member；防御 DM/异常场景下拿不到身份组
-        if isinstance(member, discord.Member) and member.get_role(REQUIRED_ROLE_ID):
+        if isinstance(member, discord.Member) and any(
+            member.get_role(role_id) for role_id in REQUIRED_ROLE_IDS
+        ):
             return False
         await interaction.response.send_message(
             "👶 使用 /找妈妈 需要先领取对应身份组。\n"
