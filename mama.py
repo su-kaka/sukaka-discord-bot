@@ -173,7 +173,7 @@ class RegisterModal(discord.ui.Modal):
         self.region_input = discord.ui.TextInput(
             label="区域（必填）",
             style=discord.TextStyle.short,
-            placeholder="例如：美东 / 美西 / 欧洲",
+            placeholder="例如：美国加州 / 德国 / 日本（美国具体到州，其他具体到国）",
             required=True,
             max_length=REGION_MAX_LENGTH,
             default=existing.region if existing else None,
