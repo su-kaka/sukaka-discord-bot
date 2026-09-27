@@ -16,7 +16,7 @@ from roulette.bank import (
     get_richest_accounts,
     mark_heist_cooldown,
 )
-from roulette.gacha import add_buff, consume_effect
+from roulette.gacha import add_buff, consume_effect, is_offline
 from roulette.constants import (
     BANK_HEIST_AUTO_INTERVAL_SECONDS,
     BANK_HEIST_BASE_SUCCESS,
@@ -94,6 +94,8 @@ class BankHeistView(discord.ui.View):
         """检查用户是否可加入，返回错误信息或 None。"""
         if user.bot:
             return "机器人不能参与抢银行。"
+        if is_offline(user.id):
+            return "你处于下线状态，无法参与抢银行！发言可解除下线状态。"
         if any(m[0].id == user.id for m in self.members):
             return "你已报名。"
         if len(self.members) >= BANK_HEIST_TEAM_SIZE:
@@ -198,8 +200,6 @@ class BankHeistView(discord.ui.View):
         success_rate = min(success_rate, 95)  # 上限 95%
 
         # 优先选取存款最多的目标（排除发起人和队员自己的银行账户，以及下线用户）
-        from roulette.gacha import is_offline
-
         member_ids = {self.leader.id} | {user.id for user, _, _ in self.members}
         # 取存款最多的前 30 个候选（含队员排除冗余），再按存款排序选 1-10 个
         candidates = [
