@@ -1,5 +1,4 @@
 大锅饭网址：https://catiecli.sukaka.top/
-- Build渠道：gemini-3.7-flash/gemini-3.8-flash每天各100条，北京时间15:00刷新
 - GCLI凭证报错`403 You do not have a valid license`→开通 Pro，或找可用的家庭组
 - Pro凭证（学生/企业）→**500Pro+3000Flash**（除gemini外可额外吃glm-5.3/dsv4p/kimi-k2.6）
 - Free凭证→**1000Flash**（除gemini外可额外吃glm5.3f/dsv4f）
