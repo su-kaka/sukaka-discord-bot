@@ -20,7 +20,8 @@ async def query_quota(client: httpx.AsyncClient, username: str) -> Optional[int]
             "GET",
             f"{api_base}/api/activity-quota/query",
             headers={"X-Activity-Quota-Key": api_key},
-            json={"username": username},
+            json={"discord_name": username},
+            timeout=15.0,
         )
         data = response.json()
         if response.is_success and data.get("success") is True:
@@ -41,7 +42,8 @@ async def adjust_quota(
         response = await client.post(
             f"{api_base}/api/activity-quota/{endpoint}",
             headers={"X-Activity-Quota-Key": api_key},
-            json={"username": username, "amount": amount},
+            json={"discord_name": username, "amount": amount},
+            timeout=15.0,
         )
         data = response.json()
         if response.is_success and data.get("success") is True:
@@ -54,9 +56,10 @@ async def adjust_quota(
 async def query_top_quota(
     client: httpx.AsyncClient, exclude: Optional[Iterable[str]] = None
 ) -> Optional[list[tuple[str, int]]]:
-    """查询活动额度前十用户，返回 (username, quota) 列表。
+    """查询活动额度前十用户，返回 (discord_name, quota) 列表。
 
-    exclude：需要排除的用户名，通过 /top 接口的 exclude 参数在服务端过滤，
+    discord_name 为用户的 Discord 用户名。
+    exclude：需要排除的 Discord 用户名，通过 /top 接口的 exclude 参数在服务端过滤，
     被排除用户不占用榜单名次。
     """
     api_key = os.getenv("ACTIVITY_QUOTA_API_KEY")
@@ -70,11 +73,15 @@ async def query_top_quota(
             f"{api_base}/api/activity-quota/top",
             headers={"X-Activity-Quota-Key": api_key},
             params=params,
+            timeout=15.0,
         )
         data = response.json()
         if response.is_success and data.get("success") is True:
             users = data.get("users", [])
-            return [(u["username"], int(u["activity_quota"])) for u in users]
+            return [
+                (u.get("discord_name") or u["username"], int(u["activity_quota"]))
+                for u in users
+            ]
         return None
     except (httpx.HTTPError, ValueError, KeyError):
         return None

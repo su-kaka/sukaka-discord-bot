@@ -48,15 +48,15 @@ Content-Type: application/json
 X-Activity-Quota-Key: 你的活动额度专用密钥
 ```
 
-用户可以通过 `user_id` 或 `username` 指定，但不能同时提供两个字段。
+用户可以通过 `user_id` 或 `discord_name` 指定，但不能同时提供两个字段。`discord_name` 为用户的 Discord 用户名（匹配 `discord_name` 字段，不是本站用户名）。
 
-### 按用户名发放
+### 按 Discord 用户名发放
 
 ```bash
 curl -X POST "https://你的域名/api/activity-quota/grant" \
   -H "Content-Type: application/json" \
   -H "X-Activity-Quota-Key: 你的活动额度专用密钥" \
-  -d '{"username":"testuser","amount":100}'
+  -d '{"discord_name":"testuser","amount":100}'
 ```
 
 ### 按用户 ID 发放
@@ -80,9 +80,9 @@ HTTP 状态码为 `200` 时表示发放成功：
   "message": "活动额度增加成功",
   "user_id": 123,
   "username": "testuser",
+  "discord_name": "testuser",
   "added": 100,
-  "current_activity_quota": 250,
-  "activity_quota": 250
+  "current_activity_quota": 250
 }
 ```
 
@@ -91,8 +91,6 @@ HTTP 状态码为 `200` 时表示发放成功：
 ```text
 活动额度增加成功，用户 testuser 增加 100 点，当前额度 250 点。
 ```
-
-其中 `activity_quota` 是兼容旧调用方保留的字段，新的机器人优先使用 `current_activity_quota`。
 
 ## 4. 给用户减少额度
 
@@ -104,11 +102,11 @@ Content-Type: application/json
 X-Activity-Quota-Key: 你的活动额度专用密钥
 ```
 
-请求体格式与增加额度相同，可以使用 `user_id` 或 `username`：
+请求体格式与增加额度相同，可以使用 `user_id` 或 `discord_name`：
 
 ```json
 {
-  "username": "testuser",
+  "discord_name": "testuser",
   "amount": 50
 }
 ```
@@ -123,9 +121,9 @@ X-Activity-Quota-Key: 你的活动额度专用密钥
   "message": "活动额度减少成功",
   "user_id": 123,
   "username": "testuser",
+  "discord_name": "testuser",
   "deducted": 50,
-  "current_activity_quota": 200,
-  "activity_quota": 200
+  "current_activity_quota": 200
 }
 ```
 
@@ -166,11 +164,11 @@ Content-Type: application/json
 X-Activity-Quota-Key: 你的活动额度专用密钥
 ```
 
-请求体使用 `user_id` 或 `username` 指定目标用户：
+请求体使用 `user_id` 或 `discord_name` 指定目标用户：
 
 ```json
 {
-  "username": "testuser"
+  "discord_name": "testuser"
 }
 ```
 
@@ -189,6 +187,7 @@ X-Activity-Quota-Key: 你的活动额度专用密钥
   "success": true,
   "user_id": 123,
   "username": "testuser",
+  "discord_name": "testuser",
   "activity_quota": 250
 }
 ```
@@ -201,7 +200,7 @@ X-Activity-Quota-Key: 你的活动额度专用密钥
 
 ## 7. 查询活动额度前十用户
 
-该接口使用专用密钥鉴权，返回活动额度数量前十的用户用户名及对应额度。
+该接口使用专用密钥鉴权，返回活动额度数量前十的用户 Discord 用户名及对应额度。
 
 ### 请求
 
@@ -214,7 +213,7 @@ X-Activity-Quota-Key: 你的活动额度专用密钥
 
 | 参数 | 位置 | 类型 | 说明 |
 | ---- | ---- | ---- | ---- |
-| `exclude` | Query | string | 需要排除的用户名，不出现在排行榜中。多个用户名用英文逗号分隔，如 `exclude=alice,bob`；用户名两侧空格会被自动去除，空项会被忽略。不传该参数时返回完整前十榜单。 |
+| `exclude` | Query | string | 需要排除的 Discord 用户名，不出现在排行榜中。多个用户名用英文逗号分隔，如 `exclude=alice,bob`；用户名两侧空格会被自动去除，空项会被忽略。不传该参数时返回完整前十榜单。 |
 
 ### 请求示例
 
@@ -234,9 +233,9 @@ curl "https://你的域名/api/activity-quota/top?exclude=alice,bob" \
 {
   "success": true,
   "users": [
-    {"username": "user1", "activity_quota": 500},
-    {"username": "user2", "activity_quota": 320},
-    {"username": "user3", "activity_quota": 100}
+    {"username": "user1", "discord_name": "user1", "activity_quota": 500},
+    {"username": "user2", "discord_name": "user2", "activity_quota": 320},
+    {"username": "user3", "discord_name": "user3", "activity_quota": 100}
   ]
 }
 ```
@@ -283,8 +282,8 @@ HTTP `404`：
 
 HTTP `422`。常见原因：
 
-- `user_id` 和 `username` 都没有提供
-- 同时提供了 `user_id` 和 `username`
+- `user_id` 和 `discord_name` 都没有提供
+- 同时提供了 `user_id` 和 `discord_name`
 - `amount` 不是正整数
 
 ## 9. Python 机器人示例
@@ -296,39 +295,39 @@ BASE_URL = "https://你的域名"
 ACTIVITY_QUOTA_KEY = "你的活动额度专用密钥"
 
 
-def query_activity_quota(username: str) -> str:
+def query_activity_quota(discord_name: str) -> str:
     response = requests.get(
         f"{BASE_URL}/api/activity-quota/query",
         headers={
             "Content-Type": "application/json",
             "X-Activity-Quota-Key": ACTIVITY_QUOTA_KEY,
         },
-        json={"username": username},
+        json={"discord_name": discord_name},
         timeout=15,
     )
     data = response.json()
 
     if response.ok and data.get("success") is True:
-        return f"用户 {data['username']} 当前活动额度为 {data['activity_quota']} 点。"
+        return f"用户 {data['discord_name']} 当前活动额度为 {data['activity_quota']} 点。"
 
     return f"查询失败：{data.get('detail', '未知错误')}"
 
 
-def grant_activity_quota(username: str, amount: int) -> str:
+def grant_activity_quota(discord_name: str, amount: int) -> str:
     response = requests.post(
         f"{BASE_URL}/api/activity-quota/grant",
         headers={
             "Content-Type": "application/json",
             "X-Activity-Quota-Key": ACTIVITY_QUOTA_KEY,
         },
-        json={"username": username, "amount": amount},
+        json={"discord_name": discord_name, "amount": amount},
         timeout=15,
     )
     data = response.json()
 
     if response.ok and data.get("success") is True:
         return (
-            f"{data['message']}，用户 {data['username']} "
+            f"{data['message']}，用户 {data['discord_name']} "
             f"增加 {data['added']} 点，"
             f"当前额度 {data['current_activity_quota']} 点。"
         )
@@ -336,21 +335,21 @@ def grant_activity_quota(username: str, amount: int) -> str:
     return f"发放失败：{data.get('detail', '未知错误')}"
 
 
-def deduct_activity_quota(username: str, amount: int) -> str:
+def deduct_activity_quota(discord_name: str, amount: int) -> str:
     response = requests.post(
         f"{BASE_URL}/api/activity-quota/deduct",
         headers={
             "Content-Type": "application/json",
             "X-Activity-Quota-Key": ACTIVITY_QUOTA_KEY,
         },
-        json={"username": username, "amount": amount},
+        json={"discord_name": discord_name, "amount": amount},
         timeout=15,
     )
     data = response.json()
 
     if response.ok and data.get("success") is True:
         return (
-            f"{data['message']}，用户 {data['username']} "
+            f"{data['message']}，用户 {data['discord_name']} "
             f"减少 {data['deducted']} 点，"
             f"当前额度 {data['current_activity_quota']} 点。"
         )
@@ -373,7 +372,7 @@ def get_top_activity_quota_users(exclude: str = "") -> str:
         users = data.get("users", [])
         if not users:
             return "当前暂无活动额度用户。"
-        entries = [f"{u['username']}（{u['activity_quota']} 点）" for u in users]
+        entries = [f"{u['discord_name']}（{u['activity_quota']} 点）" for u in users]
         return f"当前活动额度前十：{'、'.join(entries)}。"
 
     return f"查询失败：{data.get('detail', '未知错误')}"
