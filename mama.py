@@ -1,4 +1,4 @@
-"""找妈妈：家庭组共享登记。三个斜杠命令 /登记妈妈 /找妈妈 /家庭组教程，全部响应 ephemeral，仅发起者本人可见。"""
+"""找妈妈：家庭组共享登记。六个斜杠命令 /登记妈妈 /找妈妈 /家庭组教程 /拉黑 /解除拉黑 /拉黑列表，全部响应 ephemeral，仅发起者本人可见。"""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, NamedTuple, Optional
 
 import discord
+from discord import app_commands
 
 if TYPE_CHECKING:
     from bot import SukakaBot
@@ -25,10 +26,12 @@ REQUIRED_ROLE_IDS = (
 BLOCKED_ROLE_IDS = (
     1271383429346365450,
 )
-ROLE_CLAIM_LINK = (
-    "https://discord.com/channels/1134557553011998840"
-    "/1383603412956090578/1536717951170773155"
-)
+# 拥有 /拉黑 /解除拉黑 使用权的用户（服务端硬编码，后续拓展往里加 ID 即可）
+BLOCK_COMMAND_USER_IDS = (
+    1077843520917872670,
+    793866542151368746)
+# 没领身份组的用户点 /找妈妈 时，引导去这条消息处领取身份组
+ROLE_CLAIM_LINK = "https://discord.com/channels/1134557553011998840/1383603412956090578/1536717951170773155"
 
 # 「/家庭组教程」发送 docs/family-group-guide.md 的渲染结果，改教程只改那一个文件
 GUIDE_FILE = Path(os.getenv("MAMA_GUIDE_FILE", "docs/family-group-guide.md"))
@@ -56,7 +59,7 @@ class MamaRegistration(NamedTuple):
 
 
 def _init_db() -> None:
-    """建表：一人一条登记记录。"""
+    """建表：一人一条登记记录 + 一人一条拉黑记录。"""
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute(
             """
@@ -67,6 +70,14 @@ def _init_db() -> None:
                 note TEXT NOT NULL DEFAULT '',
                 created_at REAL NOT NULL,
                 updated_at REAL NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS mama_blocks (
+                discord_id INTEGER PRIMARY KEY,
+                blocked_at REAL NOT NULL
             )
             """
         )
@@ -122,6 +133,43 @@ def get_all_registrations() -> list[MamaRegistration]:
             " FROM mama_registrations ORDER BY created_at ASC"
         ).fetchall()
     return [MamaRegistration._make(row) for row in rows]
+
+
+def is_blocked(discord_id: int) -> bool:
+    """查某人是否被拉黑，/找妈妈 入口与 /拉黑 幂等提示用。"""
+    with sqlite3.connect(DB_PATH) as conn:
+        row = conn.execute(
+            "SELECT 1 FROM mama_blocks WHERE discord_id = ?", (discord_id,)
+        ).fetchone()
+    return row is not None
+
+
+def add_block(discord_id: int) -> bool:
+    """拉黑某人，返回是否新插入（重复拉黑不报错，幂等）。"""
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.execute(
+            "INSERT OR IGNORE INTO mama_blocks (discord_id, blocked_at) VALUES (?, ?)",
+            (discord_id, time.time()),
+        )
+        return cursor.rowcount > 0
+
+
+def remove_block(discord_id: int) -> bool:
+    """解除拉黑，返回是否确实移除了一条。"""
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.execute(
+            "DELETE FROM mama_blocks WHERE discord_id = ?", (discord_id,)
+        )
+        return cursor.rowcount > 0
+
+
+def get_all_blocks() -> list[tuple[int, float]]:
+    """返回全部拉黑记录，按拉黑时间升序。"""
+    with sqlite3.connect(DB_PATH) as conn:
+        rows = conn.execute(
+            "SELECT discord_id, blocked_at FROM mama_blocks ORDER BY blocked_at ASC"
+        ).fetchall()
+    return [(int(row[0]), float(row[1])) for row in rows]
 
 
 class RegisterPromptView(discord.ui.View):
@@ -340,10 +388,12 @@ def _load_guide_text() -> str:
 
 
 def register_commands(bot: "SukakaBot") -> None:
-    """注册三个斜杠命令（由 bot.py 的 setup_hook 调用，on_ready 的 tree.sync 同步生效）。
+    """注册六个斜杠命令（由 bot.py 的 setup_hook 调用，on_ready 的 tree.sync 同步生效）。
 
     全部响应都是 ephemeral：只有发起者本人可见，频道里不产生任何公开消息。
-    命令仅限 MAMA_CHANNEL_ID 频道内使用，其他频道里提示「仅限找妈妈频道」。
+    /登记妈妈 /找妈妈 /家庭组教程 仅限 MAMA_CHANNEL_ID 频道内使用，
+    其他频道里提示「仅限找妈妈频道」；/拉黑 /解除拉黑 /拉黑列表 不限频道，
+    但仅限 BLOCK_COMMAND_USER_IDS 里的管理员使用。
     """
 
     async def _deny_if_wrong_channel(interaction: discord.Interaction) -> bool:
@@ -355,12 +405,29 @@ def register_commands(bot: "SukakaBot") -> None:
         )
         return True
 
+    async def _deny_if_not_block_admin(interaction: discord.Interaction) -> bool:
+        """管理员检查：不在 BLOCK_COMMAND_USER_IDS 里时拒绝，返回 True 表示拒绝。"""
+        if interaction.user.id in BLOCK_COMMAND_USER_IDS:
+            return False
+        await interaction.response.send_message(
+            "⚠️ 你没有权限使用这个命令。", ephemeral=True
+        )
+        return True
+
     async def _deny_if_missing_role(interaction: discord.Interaction) -> bool:
-        """身份组检查：被拉黑身份组直接拒绝；需领取指定身份组之一，缺组时提示领取链接。"""
+        """拉黑/身份组检查：被拉黑用户直接拒绝；需领取指定身份组之一，缺组时提示领取链接。"""
         member = interaction.user
         # 频道限 guild 内使用，正常都是 Member；防御 DM/异常场景下拿不到身份组
         if isinstance(member, discord.Member):
-            # 黑名单优先：命中即拒绝，不再看白名单
+            # 用户级拉黑优先：命中即拒绝，不看身份组
+            if is_blocked(member.id):
+                await interaction.response.send_message(
+                    "⚠️ 你已被管理员限制使用 /找妈妈。\n"
+                    "如有疑问请联系管理员。",
+                    ephemeral=True,
+                )
+                return True
+            # 身份组黑名单次之：命中即拒绝，不再看白名单
             if any(member.get_role(role_id) for role_id in BLOCKED_ROLE_IDS):
                 await interaction.response.send_message(
                     "⚠️ 你已被警告，无法使用 /找妈妈。\n"
@@ -475,8 +542,122 @@ def register_commands(bot: "SukakaBot") -> None:
                 chunk, ephemeral=True, allowed_mentions=no_mentions
             )
 
+    # 拉黑命令不限频道（管理员可能在任何地方处理）；但仅限 BLOCK_COMMAND_USER_IDS 使用
+    @bot.tree.command(
+        name="拉黑",
+        description="禁止指定用户使用 /找妈妈（仅管理员）",
+    )
+    @app_commands.describe(target="要拉黑的用户")
+    async def block_user(
+        interaction: discord.Interaction, target: discord.Member
+    ) -> None:
+        if await _deny_if_not_block_admin(interaction):
+            return
+        if target.bot:
+            await interaction.response.send_message(
+                "拉黑机器人没有意义，请选择普通用户。", ephemeral=True
+            )
+            return
+        if target.id == interaction.user.id:
+            await interaction.response.send_message(
+                "不能拉黑你自己。", ephemeral=True
+            )
+            return
+        try:
+            added = add_block(target.id)
+        except sqlite3.Error as exc:
+            print(
+                f"[Mama] 拉黑失败 operator={interaction.user.id}"
+                f" target={target.id}：{exc}"
+            )
+            await interaction.response.send_message(
+                "拉黑失败：数据库错误，请稍后再试。", ephemeral=True
+            )
+            return
+        if added:
+            await interaction.response.send_message(
+                f"⛔ 已拉黑 {target.mention}，其将无法使用 /找妈妈。",
+                ephemeral=True,
+            )
+        else:
+            await interaction.response.send_message(
+                f"{target.mention} 已在拉黑列表中，无需重复拉黑。",
+                ephemeral=True,
+            )
+
+    @bot.tree.command(
+        name="解除拉黑",
+        description="恢复指定用户使用 /找妈妈 的权限（仅管理员）",
+    )
+    @app_commands.describe(target="要解除拉黑的用户（已退服也可填 ID）")
+    async def unblock_user(
+        interaction: discord.Interaction, target: discord.User
+    ) -> None:
+        if await _deny_if_not_block_admin(interaction):
+            return
+        try:
+            removed = remove_block(target.id)
+        except sqlite3.Error as exc:
+            print(
+                f"[Mama] 解除拉黑失败 operator={interaction.user.id}"
+                f" target={target.id}：{exc}"
+            )
+            await interaction.response.send_message(
+                "解除拉黑失败：数据库错误，请稍后再试。", ephemeral=True
+            )
+            return
+        if removed:
+            await interaction.response.send_message(
+                f"✅ 已解除 {target.mention} 的拉黑，其可以重新使用 /找妈妈。",
+                ephemeral=True,
+            )
+        else:
+            await interaction.response.send_message(
+                f"{target.mention} 不在拉黑列表中。",
+                ephemeral=True,
+            )
+
+    @bot.tree.command(
+        name="拉黑列表",
+        description="查看当前 /找妈妈 拉黑名单（仅管理员）",
+    )
+    async def block_list(interaction: discord.Interaction) -> None:
+        if await _deny_if_not_block_admin(interaction):
+            return
+        try:
+            blocks = get_all_blocks()
+        except sqlite3.Error as exc:
+            print(f"[Mama] 读取拉黑列表失败：{exc}")
+            await interaction.response.send_message(
+                "读取拉黑列表失败，请稍后再试。", ephemeral=True
+            )
+            return
+        if not blocks:
+            await interaction.response.send_message(
+                "拉黑列表为空。", ephemeral=True
+            )
+            return
+        lines = ["⛔ **/找妈妈 拉黑名单**"]
+        for user_id, blocked_at in blocks:
+            blocked_at_text = time.strftime(
+                "%Y-%m-%d %H:%M UTC", time.gmtime(blocked_at)
+            )
+            lines.append(f"- <@{user_id}>（{blocked_at_text} 拉黑）")
+        lines.append(f"共 {len(blocks)} 人。")
+        # 列表不 ping 被拉黑者（mention 仅渲染为 @名字，不产生通知）
+        no_mentions = discord.AllowedMentions.none()
+        chunks = _split_text_chunks("\n".join(lines))
+        await interaction.response.send_message(
+            chunks[0], ephemeral=True, allowed_mentions=no_mentions
+        )
+        for chunk in chunks[1:]:
+            await interaction.followup.send(
+                chunk, ephemeral=True, allowed_mentions=no_mentions
+            )
+
     print(
-        "[Mama] 斜杠命令已注册：/登记妈妈 /找妈妈 /家庭组教程"
+        "[Mama] 斜杠命令已注册：/登记妈妈 /找妈妈 /家庭组教程 "
+        "/拉黑 /解除拉黑 /拉黑列表"
         f"（全部 ephemeral，仅发起者可见），数据库 {DB_PATH}"
     )
 

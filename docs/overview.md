@@ -34,7 +34,7 @@ python bot.py
 | --- | --- | --- | --- |
 | 游戏区（roulette） | `1545664527410929745` | 消息关键词（如「赌大小」「抽卡」） | message_content、members |
 | 频道轮播（carousel） | `1455038454772531311` | 定时任务，每分钟 | 无特殊要求 |
-| 找妈妈（mama） | `1455038454772531311` | 斜杠命令 `/登记妈妈` `/找妈妈` `/家庭组教程`（仅限该频道，全部 ephemeral 仅发起者可见） | 无特殊要求（斜杠命令） |
+| 找妈妈（mama） | `1455038454772531311` | 斜杠命令 `/登记妈妈` `/找妈妈` `/家庭组教程`（仅限该频道，全部 ephemeral 仅发起者可见）；管理命令 `/拉黑` `/解除拉黑` `/拉黑列表`（不限频道，仅限 `BLOCK_COMMAND_USER_IDS`） | 无特殊要求（斜杠命令） |
 | 管理命令（channel_admin） | `1293095144806940738` | 斜杠命令 `/mute_vote` `/delete_message` `/mark_message` `/unmark_message` | manage_roles、manage_messages |
 
 ## 外部依赖

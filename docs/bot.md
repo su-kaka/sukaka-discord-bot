@@ -21,7 +21,7 @@ main()
  └── bot = SukakaBot(); bot.run(token)
       ├── setup_hook()（登录前）
       │    ├── register_commands(bot)     # channel_admin 的 4 个斜杠命令
-      │    └── register_mama_commands(bot)  # mama 的 3 个斜杠命令（/登记妈妈 /找妈妈 /家庭组教程）
+      │    └── register_mama_commands(bot)  # mama 的 6 个斜杠命令（/登记妈妈 /找妈妈 /家庭组教程 /拉黑 /解除拉黑 /拉黑列表）
       └── on_ready()（登录后，可能因重连多次触发）
            ├── await self.tree.sync()          # 同步斜杠命令到 Discord（仅首次）
            ├── 恢复未到期的频道禁言            # start_channel_mute_restores（读 channel_mutes.db）
