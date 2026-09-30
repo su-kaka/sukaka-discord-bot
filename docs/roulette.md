@@ -65,7 +65,7 @@ start_roulette(bot)
   - `consume_effect(user_id, key) -> bool`：读出即消费（一次性卡）；
   - `has_effect(user_id, key) -> bool`：只查不消费；
   - `is_offline(user_id) -> bool` / `clear_offline`：下线状态。
-- 唯一道具（蛇符咒、会员卡、流星雨、收藏家、诅咒之眼、神性、D6、领主阳伞）用单行表 `snake_charm_holder` / `membership_card_holder` / `meteor_shower_holder` / `collector_card_holder` / `curse_eye_holder` / `divinity_holder` / `d6_holder` / `lord_parasol_holder` 存持有者。**领主阳伞**：持有者黑市购买任意物品**免费（0 点购入）**，跳过查额与扣额（见 black_market.py），效果永久直到被他人抽到/抢走/变卖。**流星雨**：持有者发送「来财」掉落**无冷却且必定掉落额度**（见 quota_drop.py），每次掉落后 `METEOR_DISSIPATE_CHANCE`（22.22%）概率**星光消散**（`clear_meteor_shower_holder` 销毁，直到消散或被他人抽到/抢走/变卖）。收藏家持有期间，抽卡获得的背包道具次数**叠加**（重复抽到 +1，核心函数 `_add_effect_on_draw`）；未持有收藏家时重复抽到不叠加，但**保留已有数量不会重置**。抢劫偷来的背包道具一律叠加（+1）到自己的背包。
+- 唯一道具（蛇符咒、会员卡、流星雨、收藏家、诅咒之眼、神性、D6、领主阳伞）用单行表 `snake_charm_holder` / `membership_card_holder` / `meteor_shower_holder` / `collector_card_holder` / `curse_eye_holder` / `divinity_holder` / `d6_holder` / `lord_parasol_holder` 存持有者。**领主阳伞**：持有者黑市购买任意物品**免费（0 点购入）**，跳过查额与扣额（见 black_market.py），每次免费购买后 `LORD_PARASOL_BREAK_CHANCE`（33%）概率**破损**（`clear_lord_parasol_holder` 销毁，直到破损或被他人抽到/抢走/变卖）。**流星雨**：持有者发送「来财」掉落**无冷却且必定掉落额度**（见 quota_drop.py），每次掉落后 `METEOR_DISSIPATE_CHANCE`（22.22%）概率**星光消散**（`clear_meteor_shower_holder` 销毁，直到消散或被他人抽到/抢走/变卖）。收藏家持有期间，抽卡获得的背包道具次数**叠加**（重复抽到 +1，核心函数 `_add_effect_on_draw`）；未持有收藏家时重复抽到不叠加，但**保留已有数量不会重置**。抢劫偷来的背包道具一律叠加（+1）到自己的背包。
 - **D6**（`gacha.py` 的 `handle_d6`）：唯一道具，持有者发送 `D6` 关键词触发，掷骰重置身上的道具与状态 buff——**数量不变、种类改变**：唯一道具重置为其他唯一道具（新目标的原持有者被覆盖，与抽到/抢夺行为一致；重置成神性时同样解除诅咒），背包道具重置为其他背包道具（撞车自动合并数量，`BAG_CARDS` 为候选池），身上状态 buff（诅咒/祝福/虚弱/仇恨）重置为其他状态 buff（`BUFF_POOL` 为候选池，单实例不叠加、不与已有状态撞车，候选耗尽保持不变；唯一道具重置成神性解除诅咒后重新读取）。每次使用需 `D6_RECHARGE_COST`（66 点）充能，额度不足/身上无可重置目标时不消耗；重置时 D6 自身不受影响（固定持有，直到被他人抽到/抢走/变卖）。唯一道具持有者存取统一收敛到 `UNIQUE_HOLDER_ACCESSORS` 映射。
 - **神性**（`bless.py` 的 `handle_bless` + `handlers.py` 梭哈分支）：唯一道具，抽到即**解除身上的诅咒**（`remove_buff(user, "curse")`），并解锁 `祝福 @某人` 能力。祝福写入 `active_buffs` 表的 `bless` buff（不进背包，不可被抢夺/变卖/交换，随「我的卡牌」展示在「身上状态」区），梭哈时：持有一念天堂则**覆盖祝福**（75% + 翻三倍，祝福不消耗保留）；否则祝福生效（成功率 `BLESS_ALLIN_SUCCESS_CHANCE` = 75%，倍率不变，结算后消耗）。每次祝福 `DIVINITY_EXHAUST_CHANCE`（50%）概率神力耗尽（`clear_divinity_holder` 销毁）。
 - **状态 buff 表 `active_buffs`**（`discord_id, buff_key, created_at`）：存诅咒/祝福/虚弱/仇恨这类非道具状态（`BUFF_POOL` 定义名称与描述）。与背包表 `gacha_effects` 的区别：buff 不占卡牌槽、不进抽卡池、不可被偷/卖/交换，「我的卡牌」单独展示。
@@ -79,7 +79,7 @@ start_roulette(bot)
 
 - 发送 `黑市`（`BLACK_MARKET_KEYWORD`）拉出购买界面：全服共享货架随机上架 `BLACK_MARKET_SLOTS`（10）种卡牌，价格 `BLACK_MARKET_PRICE_MIN`-`BLACK_MARKET_PRICE_MAX`（100-500）随机、库存 `BLACK_MARKET_STOCK_MIN`-`BLACK_MARKET_STOCK_MAX`（1-5）随机。
 - **出售范围**：背包道具卡（`BAG_CARDS`）+ 即时生效卡（`INSTANT_SETTLE_CARDS`）− 种类排除名单（`BLACK_MARKET_EXCLUDED_KINDS`：`unique` 唯一道具）− 卡牌排除名单（`BLACK_MARKET_EXCLUDED_CARDS`：空白/许愿池/通货膨胀/存为王/虚弱/自爆）。即：**不卖唯一道具、空白、许愿池、虚弱、自爆，即时生效卡中不出现通货膨胀与存为王**。
-- **购买流程**：每种在售卡牌一个按钮 → 已持有且未持有收藏家的背包道具直接拦截（不扣库存不扣额度，提示需「收藏家」才能叠加）→ `UPDATE ... WHERE stock > 0` 原子扣库存（并发只有一个成功）→ 扣额度（不足则回补库存；**领主阳伞持有者跳过查额与扣额，0 点免费购入**）→ 发货：即时生效卡静默结算（`announce=False`），背包卡 `_add_effect_on_draw` 入包（与抽卡同款收藏家叠加规则）。
+- **购买流程**：每种在售卡牌一个按钮 → 已持有且未持有收藏家的背包道具直接拦截（不扣库存不扣额度，提示需「收藏家」才能叠加）→ `UPDATE ... WHERE stock > 0` 原子扣库存（并发只有一个成功）→ 扣额度（不足则回补库存；**领主阳伞持有者跳过查额与扣额，0 点免费购入，每次购买后 33% 概率破损销毁**）→ 发货：即时生效卡静默结算（`announce=False`），背包卡 `_add_effect_on_draw` 入包（与抽卡同款收藏家叠加规则）。
 - **卖光重置**：货架全部售罄后自动 `_restock()` 重新随机 10 种并刷新界面；货架存 `black_market.db` 的 `black_market_shelf` 表，重启不丢失。
 - 界面超时 `BLACK_MARKET_TIMEOUT_SECONDS`（300 秒）后移除按钮，货架库存保留。
 

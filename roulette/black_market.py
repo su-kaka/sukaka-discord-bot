@@ -24,6 +24,7 @@ from roulette.constants import (
     BLACK_MARKET_STOCK_MAX,
     BLACK_MARKET_STOCK_MIN,
     BLACK_MARKET_TIMEOUT_SECONDS,
+    LORD_PARASOL_BREAK_CHANCE,
 )
 from roulette.gacha import (
     BAG_CARDS,
@@ -38,6 +39,7 @@ from roulette.gacha import (
     _settle_selfdestruct,
     _settle_sellout,
     _settle_weak,
+    clear_lord_parasol_holder,
     has_collector,
     has_effect,
     has_lord_parasol,
@@ -316,10 +318,22 @@ class BlackMarketView(discord.ui.View):
                     note = "\n🎒 已放入背包，可用 `我的卡牌` 查看。"
 
             price_note = "免费（⛱️领主阳伞）" if price == 0 else f"-{price} 点"
+
+            # 领主阳伞破损判定：免费购入后掷概率，破损则销毁阳伞
+            parasol_broke = False
+            if price == 0 and random.random() < LORD_PARASOL_BREAK_CHANCE:
+                clear_lord_parasol_holder()
+                parasol_broke = True
+
             result_text = (
                 f"🌒 {user.mention} 买下 **{name}**（{price_note}，剩 {remaining} 件）"
                 f"{note}"
             )
+            if parasol_broke:
+                result_text += (
+                    f"\n☂️⛱️ **领主阳伞破损了！**下次购物不再免费，"
+                    f"直到下一个人抽到新的领主阳伞。"
+                )
 
             # 卖光：重新上架并刷新界面，购买结果用 followup 播报
             rows_now = _load_shelf()

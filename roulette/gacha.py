@@ -42,6 +42,7 @@ from roulette.constants import (
     D6_RECHARGE_COST,
     DIVINITY_EXHAUST_CHANCE,
     INFLATION_MIN_BALANCE,
+    LORD_PARASOL_BREAK_CHANCE,
     MARRY_FEE_PERCENT,
     MARRY_MIN_FEE,
     METEOR_DISSIPATE_CHANCE,
@@ -88,7 +89,7 @@ CARD_POOL: dict[str, tuple[str, str, int]] = {
     "curseeye": ("诅咒之眼", f"持有期间发送 `诅咒 @某人`（可以诅咒自己）叠加使用诅咒之眼且无视诅咒冷却：目标额度重置为 {CURSE_EYE_QUOTA_MIN}-{CURSE_EYE_QUOTA_MAX} 之间的随机值，无法被借刀杀人反弹，每次使用有 {round(CURSE_EYE_DESTROY_CHANCE*100, 2)}% 概率销毁（唯一道具，直到下一个人抽到）", 5),
     "divinity": ("神性", f"抽到即解除身上的诅咒，解锁 `祝福 @某人` 能力：被祝福者梭哈成功率提高到 75%（无法和一念天堂叠加，一念天堂会覆盖祝福），每次祝福有 {round(DIVINITY_EXHAUST_CHANCE*100, 2)}% 概率神力耗尽（唯一道具，直到下一个人抽到）", 5),
     "d6": ("D6", f"发送「{D6_KEYWORD}」掷骰重置身上的道具与状态：数量不变、种类改变（唯一道具重置为其他唯一道具、背包道具重置为其他背包道具、状态 buff 重置为其他状态 buff），每次使用需 {D6_RECHARGE_COST} 点充能（唯一道具，直到下一个人抽到）", 5),
-    "lordparasol": ("领主阳伞", f"黑市购买任意物品免费，效果永久（唯一道具，直到下一个人抽到）", 5),
+    "lordparasol": ("领主阳伞", f"黑市购买任意物品免费，每次购买有 {round(LORD_PARASOL_BREAK_CHANCE*100, 2)}% 概率破损（唯一道具，直到破损或下一个人抽到）", 5),
     "blank": ("空白", "无效果", 40),  # 实际概率由 GACHA_BLANK_CHANCE 控制
 }
 
@@ -533,6 +534,12 @@ def has_lord_parasol(discord_id: int) -> bool:
     return get_lord_parasol_holder() == discord_id
 
 
+def clear_lord_parasol_holder() -> None:
+    """破损：销毁领主阳伞（清除持有记录），返回是否实际销毁。"""
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute("DELETE FROM lord_parasol_holder WHERE id = 1")
+
+
 # 唯一道具持有者存取映射：card_key -> (setter, getter, has, 表名)
 UNIQUE_HOLDER_ACCESSORS = {
     "snake": (set_snake_charm_holder, get_snake_charm_holder, has_snake_charm, "snake_charm_holder"),
@@ -929,7 +936,7 @@ async def handle_gacha(
         await message.channel.send(
             f"🎴 {message.author.mention} 消耗 {cost} 点抽卡……\n"
             f"⛱️ **{name}**！{desc}。{transfer_note}\n"
-            f"🌒 现在发送「{BLACK_MARKET_KEYWORD}」购物全部免费，尽情扫货！"
+            f"🌒 现在发送「{BLACK_MARKET_KEYWORD}」购物免费，但阳伞随时可能破损！"
         )
         return
 

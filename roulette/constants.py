@@ -88,6 +88,7 @@ YOURNAME_SWAP_SECONDS = 300  # 交换身体持续时间（秒）
 MY_CARDS_KEYWORD = "我的卡牌"
 D6_KEYWORD = "D6"
 D6_RECHARGE_COST = 66  # D6：每次使用的充能额度
+LORD_PARASOL_BREAK_CHANCE = 0.33  # 领主阳伞：每次黑市 0 元购后破损的概率
 OFFLINE_KEYWORD = "下线"
 OFFLINE_MIN_QUOTA = 2000  # 使用下线卡牌的最低额度要求
 OFFLINE_RESET_QUOTA = 1000  # 下线后额度重置值
