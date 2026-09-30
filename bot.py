@@ -26,11 +26,23 @@ MessageHandler = Callable[[discord.Message], Awaitable[None]]
 
 class SukakaBot(discord.Client):
     def __init__(self) -> None:
-        intents = discord.Intents.default()
+        # 只开实际用到的事件流，收窄网关流量（详见 docs/bot.md「Intents 配置」）：
+        # - guilds：频道/服务器结构（发消息、找频道必需）
+        # - members：成员变更事件（成员解析 REST 兜底仍可用，无需全量缓存）
+        # - message_content：读取消息内容（游戏关键词识别必需）
+        # 注意：default() 会附带 bans/emojis/integrations/webhooks/voice_states
+        # 等本项目用不到的事件流，全部省掉。
+        intents = discord.Intents.none()
         intents.guilds = True
         intents.members = True
         intents.message_content = True
-        super().__init__(intents=intents)
+        super().__init__(
+            intents=intents,
+            # 不在启动时全量分块下载成员列表：万人服务器每次启动能省几十 MB 流量；
+            # 成员按需走 REST 解析（utils.resolve_member_xxx），个别场景多一次 HTTP，
+            # 但整体流量与启动速度都大幅优于全量缓存。
+            chunk_guilds_at_startup=False,
+        )
 
         self.tree = app_commands.CommandTree(self)
         self.mute_votes: dict[str, VoteState] = {}

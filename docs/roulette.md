@@ -108,8 +108,19 @@ start_roulette(bot)
 | `lottery.db` | lottery_pool | 彩票奖池（单行） |
 | `quota_drops.db` | drop_cooldowns | 掉落冷却 |
 
+以上 DB 均默认存放于 `data/` 目录（`DATA_DIR` 可整体改址），由 `paths.py` 的 `data_file()` 统一解析，解析时自动建目录。
+
 - 建表都在各模块的 `_init_db()`，**import 时即执行**（`bank.py`/`gacha.py`/`lottery.py` 尾部直接调用）；`quota_drop.py` 在 `start_quota_drop()` 里调用。
-- **调参一律改 `constants.py`**，不要在业务代码里写魔法数字。DB 路径可用同名环境变量覆盖（如 `GACHA_DB`）。
+- **调参一律改 `constants.py`**，不要在业务代码里写魔法数字。DB 完整路径可用同名环境变量覆盖（如 `GACHA_DB`），未覆盖时落到 `DATA_DIR`。
+
+## 性能：流量与响应优化
+
+机器人已做以下省流量/提速处理，新增代码时务必沿用：
+
+- **Intents 最小化**（见 [bot.md](bot.md) 的「Intents 配置」）：`Intents.none()` 起步只开 `guilds`/`members`/`message_content`，不订阅 bans/emojis/voice_states 等无用事件流。
+- **关闭启动全量成员分块**（`chunk_guilds_at_startup=False`）：不再启动时下载全服成员列表；**副作用是 `guild.get_member()`/`guild.members` 基本查不到人**，所有按 ID/用户名解析成员的地方必须用 `utils.resolve_member_by_id` / `utils.resolve_member_by_name`（缓存 → 成员缓存 → REST 兜底，5 分钟 TTL）。
+- **下线状态内存缓存**（`gacha.py` 的 `_offline_cache`）：`is_offline` 在 `on_message` 里每条消息都要调用，改为进程内 set 查询，不再每次开 SQLite 连接；写入仍同步落库（重启不丢），但**只能**通过 `set_offline`/`clear_offline` 修改，绕过它们直接改 `offline_users` 表会导致缓存失效。
+- 消息处理只走注册频道分发（`bot.register_message_handler`），未注册频道零开销；但注意 Discord 网关**无法按频道订阅**，`message_content` 开着时全服消息事件仍会到达客户端（这是平台限制，省不掉）。
 
 ## 新增一个游戏的标准流程
 
@@ -117,6 +128,6 @@ start_roulette(bot)
 2. 新建 `roulette/xxx.py`，写 `async def handle_xxx(message, client, xxx_cooldowns) -> None`（复杂交互做成 `discord.ui.View`，参考 `beg.py` 的最小样例）；
 3. 在 `handlers.py`：import 常量与 handler → `start_roulette()` 里加冷却字典 → `on_message` 里加一个 `if content == XXX_KEYWORD:` 分支（注意放在掉落检查之前，且命中后 `return`）；
 4. 若需要后台循环任务：写 `async def xxx_loop(bot, client)`，在 `start_roulette()` 里 `asyncio.create_task(..., name="xxx-loop")`（参考 `big_red_packet_loop`）；
-5. 若需要本地状态：模块顶部 `DB_PATH = Path(os.getenv("XXX_DB", "xxx.db"))` + `_init_db()` + import 时调用；若是唯一道具/下线类状态，加到 `gacha.py` 的表里更省事。
+5. 若需要本地状态：模块顶部 `DB_PATH = data_file("XXX_DB", "xxx.db")`（来自 `paths.py`，默认落 `data/`，同名环境变量可覆盖完整路径）+ `_init_db()` + import 时调用；若是唯一道具/下线类状态，加到 `gacha.py` 的表里更省事。
 
 > 更完整的「新增独立频道功能」指南（建新包、注册监听、接入 bot.py）见 [extending-guide.md](extending-guide.md)。

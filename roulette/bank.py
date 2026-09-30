@@ -2,17 +2,17 @@
 
 from __future__ import annotations
 
-import os
 import random
 import sqlite3
 import time
-from pathlib import Path
 from typing import Optional
 
 import discord
 import httpx
 
+from paths import data_file
 from roulette.api import adjust_quota, query_quota
+from roulette.utils import resolve_member_by_id
 from roulette.constants import (
     BANK_DB,
     BANK_DEPOSIT_PERCENT,
@@ -29,7 +29,7 @@ from roulette.constants import (
     BANK_WITHDRAW_MIN_PERCENT,
 )
 
-DB_PATH = Path(os.getenv("BANK_DB", BANK_DB))
+DB_PATH = data_file("BANK_DB", BANK_DB)
 
 
 def _init_db() -> None:
@@ -251,7 +251,7 @@ async def handle_loan(message: discord.Message, client: httpx.AsyncClient) -> No
     # 创建贷款记录
     _create_loan(message.author.id, lender_id)
 
-    lender_member = message.guild.get_member(lender_id) if message.guild else None
+    lender_member = await resolve_member_by_id(message.guild, lender_id)
     lender_display = lender_member.mention if lender_member else f"用户 {lender_id}"
 
     await message.channel.send(
@@ -290,7 +290,7 @@ async def handle_deposit(message: discord.Message, client: httpx.AsyncClient) ->
         remaining_deposit = amount - repaid
         # 还款进入借款人的银行账户
         _add_balance(lender_id, repaid)
-        lender_member = message.guild.get_member(lender_id) if message.guild else None
+        lender_member = await resolve_member_by_id(message.guild, lender_id)
         lender_display = lender_member.mention if lender_member else f"用户 {lender_id}"
         if remaining_loan <= 0:
             loan_note = f"\n💳 已还清贷款 **{repaid} 点** 给 {lender_display}（已存入其银行账户）！"

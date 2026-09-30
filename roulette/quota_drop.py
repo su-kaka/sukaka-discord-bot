@@ -3,16 +3,15 @@
 from __future__ import annotations
 
 import asyncio
-import os
 import random
 import sqlite3
 import time
-from pathlib import Path
 from typing import Optional
 
 import discord
 import httpx
 
+from paths import data_file
 from roulette.api import adjust_quota
 from roulette.constants import (
     METEOR_DISSIPATE_CHANCE,
@@ -31,7 +30,7 @@ from roulette.constants import (
     QUOTA_DROP_ZERO_CHANCE,
 )
 
-DB_PATH = Path(os.getenv("QUOTA_DROP_DB", QUOTA_DROP_DB))
+DB_PATH = data_file("QUOTA_DROP_DB", QUOTA_DROP_DB)
 
 _batch_buffer: list[str] = []
 _batch_lock = asyncio.Lock()

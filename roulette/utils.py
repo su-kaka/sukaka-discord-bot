@@ -3,8 +3,94 @@
 from __future__ import annotations
 
 import random
+import time
+from typing import Optional
+
+import discord
 
 from roulette.constants import BIG_RED_PACKET_OPTIONS_COUNT
+
+# 成员解析结果缓存：(guild_id, key) -> (member, timestamp)。
+# 关闭启动全量成员分块后 guild.get_member() 经常未命中，REST 查询有频率限制，
+# 这里对解析结果做短期缓存，避免频繁打 REST。
+_MEMBER_CACHE: dict[tuple[int, str], tuple[discord.Member, float]] = {}
+_MEMBER_CACHE_TTL_SECONDS = 300.0
+
+
+def _cache_get(guild_id: int, key: str) -> Optional[discord.Member]:
+    entry = _MEMBER_CACHE.get((guild_id, key))
+    if entry is None:
+        return None
+    member, cached_at = entry
+    if time.monotonic() - cached_at > _MEMBER_CACHE_TTL_SECONDS:
+        _MEMBER_CACHE.pop((guild_id, key), None)
+        return None
+    return member
+
+
+def _cache_put(guild_id: int, key: str, member: discord.Member) -> None:
+    _MEMBER_CACHE[(guild_id, key)] = (member, time.monotonic())
+
+
+async def resolve_member_by_id(
+    guild: Optional[discord.Guild], discord_id: int
+) -> Optional[discord.Member]:
+    """按 discord_id 解析成员：缓存 → 成员缓存 → REST 兜底。
+
+    bot 关闭了启动全量成员分块（chunk_guilds_at_startup=False），
+    guild.get_member() 命中率低，这里提供统一的按需解析入口。
+    """
+    if guild is None:
+        return None
+    cached = _cache_get(guild.id, f"id:{discord_id}")
+    if cached is not None:
+        return cached
+    member = guild.get_member(discord_id)
+    if member is not None:
+        _cache_put(guild.id, f"id:{discord_id}", member)
+        return member
+    try:
+        member = await guild.fetch_member(discord_id)
+    except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+        return None
+    _cache_put(guild.id, f"id:{discord_id}", member)
+    return member
+
+
+async def resolve_member_by_name(
+    guild: Optional[discord.Guild], username: str
+) -> Optional[discord.Member]:
+    """按 Discord 用户名解析成员：缓存 → 成员缓存 → REST 按名字前缀搜索。
+
+    REST 搜索（search_members）支持用户名/昵称前缀匹配，不受 members Intent 影响。
+    """
+    if guild is None:
+        return None
+    cached = _cache_get(guild.id, f"name:{username}")
+    if cached is not None:
+        return cached
+    member = guild.get_member_named(username)
+    if member is not None:
+        _cache_put(guild.id, f"name:{username}", member)
+        return member
+    member = discord.utils.find(
+        lambda m: m.name == username or m.global_name == username,
+        guild.members,
+    )
+    if member is not None:
+        _cache_put(guild.id, f"name:{username}", member)
+        return member
+    try:
+        # query 语义为前缀匹配；命中后逐个精确比对，避免「alice」误匹配「alice2」
+        found = await guild.query_members(query=username, limit=100, cache=True)
+    except (discord.Forbidden, discord.HTTPException, ValueError):
+        return None
+    member = discord.utils.find(
+        lambda m: m.name == username or m.global_name == username, found
+    )
+    if member is not None:
+        _cache_put(guild.id, f"name:{username}", member)
+    return member
 
 
 def split_random(pool: int, count: int) -> list[int]:

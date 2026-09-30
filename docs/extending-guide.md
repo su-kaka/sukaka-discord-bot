@@ -116,10 +116,12 @@ def start_xxx(bot: "SukakaBot") -> None:
 
 ### 第 3 步：需要本地存储？
 
-照抄 roulette 的惯例：
+照抄 roulette 的惯例（`paths.py` 提供 `data_file`，默认落 `data/` 目录，环境变量可覆盖完整路径）：
 
 ```python
-DB_PATH = Path(os.getenv("XXX_DB", "xxx.db"))
+from paths import data_file
+
+DB_PATH = data_file("XXX_DB", "xxx.db")
 
 def _init_db() -> None:
     with sqlite3.connect(DB_PATH) as conn:

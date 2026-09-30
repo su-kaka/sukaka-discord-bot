@@ -3,16 +3,15 @@
 from __future__ import annotations
 
 import asyncio
-import os
 import random
 import sqlite3
 import time
-from pathlib import Path
 from typing import Awaitable, Callable, Optional
 
 import discord
 import httpx
 
+from paths import data_file
 from roulette.api import adjust_quota, query_quota
 from roulette.constants import (
     BLACK_MARKET_DB,
@@ -43,7 +42,7 @@ from roulette.gacha import (
     has_effect,
 )
 
-DB_PATH = Path(os.getenv("BLACK_MARKET_DB", BLACK_MARKET_DB))
+DB_PATH = data_file("BLACK_MARKET_DB", BLACK_MARKET_DB)
 
 # 卡牌种类归类：唯一道具 / 即时生效卡 / 背包道具卡 / 状态 buff 类
 KIND_UNIQUE = "unique"

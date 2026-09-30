@@ -10,17 +10,14 @@ import httpx
 from roulette.api import query_top_quota
 from roulette.constants import LEADERBOARD_TOP_N
 from roulette.gacha import get_offline_users, get_snake_charm_holder, is_offline
+from roulette.utils import resolve_member_by_id, resolve_member_by_name
 
 
-def _resolve_member_name(
+async def _resolve_member_name(
     guild: Optional[discord.Guild], discord_id: int
 ) -> Optional[str]:
-    """通过 discord_id 解析用户名，找不到返回 None。"""
-    if guild is None:
-        return None
-    member = guild.get_member(discord_id)
-    if member is None:
-        member = discord.utils.find(lambda m: m.id == discord_id, guild.members)
+    """通过 discord_id 解析用户名，找不到返回 None（REST 兜底版）。"""
+    member = await resolve_member_by_id(guild, discord_id)
     return member.name if member else None
 
 
@@ -31,11 +28,11 @@ async def handle_leaderboard(message: discord.Message, client: httpx.AsyncClient
     snake_holder = get_snake_charm_holder()
     exclude_names: set[str] = set()
     if snake_holder is not None:
-        name = _resolve_member_name(guild, snake_holder)
+        name = await _resolve_member_name(guild, snake_holder)
         if name:
             exclude_names.add(name)
     for discord_id in get_offline_users():
-        name = _resolve_member_name(guild, discord_id)
+        name = await _resolve_member_name(guild, discord_id)
         if name:
             exclude_names.add(name)
     top_users = await query_top_quota(client, exclude_names)
@@ -52,16 +49,9 @@ async def handle_leaderboard(message: discord.Message, client: httpx.AsyncClient
             break
         # 蛇符咒持有者隐身
         display = username
-        member = None
-        if guild:
-            member = guild.get_member_named(username)
-            if member is None:
-                member = discord.utils.find(
-                    lambda m: m.name == username or m.global_name == username,
-                    guild.members,
-                )
-            if member:
-                display = member.mention
+        member = await resolve_member_by_name(guild, username) if guild else None
+        if member:
+            display = member.mention
         if member and snake_holder and member.id == snake_holder:
             continue
         # 下线状态：不出现在排行榜

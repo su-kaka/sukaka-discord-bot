@@ -12,6 +12,8 @@ from typing import TYPE_CHECKING, NamedTuple, Optional
 import discord
 from discord import app_commands
 
+from paths import data_file
+
 if TYPE_CHECKING:
     from bot import SukakaBot
 
@@ -36,7 +38,7 @@ ROLE_CLAIM_LINK = "https://discord.com/channels/1134557553011998840/138360341295
 # 「/家庭组教程」发送 docs/family-group-guide.md 的渲染结果，改教程只改那一个文件
 GUIDE_FILE = Path(os.getenv("MAMA_GUIDE_FILE", "docs/family-group-guide.md"))
 
-DB_PATH = Path(os.getenv("MAMA_DB", "mama.db"))
+DB_PATH = data_file("MAMA_DB", "mama.db")
 
 PROMPT_VIEW_TIMEOUT = 300  # /登记妈妈 提示消息上的按钮有效期（秒）
 LIST_VIEW_TIMEOUT = 600  # /找妈妈 列表消息上的下拉菜单有效期（秒）

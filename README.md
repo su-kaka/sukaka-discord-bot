@@ -36,12 +36,13 @@ pip install -r requirements.txt
 
 - DISCORD_TOKEN：Discord Bot Token
 - MUTE_WHITELIST：白名单用户 ID，多个用英文逗号分隔
-- CHANNEL_MUTES_DB：可选，频道禁言记录数据库路径，默认 `channel_mutes.db`
+- CHANNEL_MUTES_DB：可选，频道禁言记录数据库路径，默认 `data/channel_mutes.db`
 - CAROUSEL_FILE：可选，循环消息文件路径，默认 `docs/carousel-content.md`
 - CAROUSEL_INTERVAL_MINUTES：可选，循环发送间隔（分钟），默认 `5`
 - ACTIVITY_QUOTA_API_KEY：活动额度发放专用密钥（必填，否则掉落功能不生效）
 - ACTIVITY_QUOTA_API_BASE：可选，活动额度 API 地址，默认 `https://catiecli.sukaka.top`
-- QUOTA_DROP_DB：可选，掉落冷却数据库文件路径，默认 `quota_drops.db`
+- QUOTA_DROP_DB：可选，掉落冷却数据库文件路径，默认 `data/quota_drops.db`
+- DATA_DIR：可选，所有本地 SQLite 数据库的存放目录（默认 `data/`）；各模块同名环境变量指定的完整路径优先于此项
 
 示例：
 
@@ -167,6 +168,7 @@ https://discord.com/channels/<guild_id>/<channel_id>/<message_id>
 ## 项目文件
 
 - bot.py：机器人主程序
+- paths.py：数据目录统一解析（默认 `data/`，支持 DATA_DIR 环境变量整体改址）
 - carousel.py：循环消息模块
 - channel_admin.py：频道管理指令模块
 - quota_drop.py：「来财」关键词掉落活动额度模块

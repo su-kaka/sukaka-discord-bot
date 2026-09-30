@@ -3,16 +3,15 @@
 from __future__ import annotations
 
 import asyncio
-import os
 import random
 import sqlite3
 import time
-from pathlib import Path
 from typing import Optional
 
 import discord
 import httpx
 
+from paths import data_file
 from roulette.api import adjust_quota, query_quota, query_top_quota
 from roulette.bank import (
     _add_balance,
@@ -53,8 +52,9 @@ from roulette.constants import (
     YOURNAME_SWAP_SECONDS,
 )
 from roulette.packet_base import PacketView
+from roulette.utils import resolve_member_by_id, resolve_member_by_name
 
-DB_PATH = Path(os.getenv("GACHA_DB", GACHA_DB))
+DB_PATH = data_file("GACHA_DB", GACHA_DB)
 
 # 卡牌定义：key -> (名称, 描述, 权重)
 CARD_POOL: dict[str, tuple[str, str, int]] = {
@@ -224,23 +224,35 @@ def set_offline(discord_id: int) -> None:
             "INSERT OR REPLACE INTO offline_users (discord_id, created_at) VALUES (?, ?)",
             (discord_id, time.time()),
         )
+    _offline_cache.add(discord_id)
+
+
+# 下线状态内存缓存：on_message 每条消息都要查一次，全量读进内存后不再反复开
+# SQLite 连接。写入只经过 set_offline/clear_offline（单进程单事件循环），缓存可靠。
+_offline_cache: set[int] = set()
+
+
+def _load_offline_cache() -> None:
+    """从数据库全量加载下线用户（首次访问时懒加载）。"""
+    if _offline_cache:
+        return
+    with sqlite3.connect(DB_PATH) as conn:
+        rows = conn.execute("SELECT discord_id FROM offline_users").fetchall()
+    _offline_cache.update(row[0] for row in rows)
 
 
 def is_offline(discord_id: int) -> bool:
-    """用户是否处于下线状态。"""
-    with sqlite3.connect(DB_PATH) as conn:
-        row = conn.execute(
-            "SELECT 1 FROM offline_users WHERE discord_id = ?",
-            (discord_id,),
-        ).fetchone()
-    return row is not None
+    """用户是否处于下线状态（内存缓存，无数据库查询）。"""
+    if not _offline_cache:
+        _load_offline_cache()
+    return discord_id in _offline_cache
 
 
 def get_offline_users() -> list[int]:
-    """查询所有处于下线状态的用户 discord_id 列表。"""
-    with sqlite3.connect(DB_PATH) as conn:
-        rows = conn.execute("SELECT discord_id FROM offline_users").fetchall()
-    return [row[0] for row in rows]
+    """查询所有处于下线状态的用户 discord_id 列表（内存缓存，无数据库查询）。"""
+    if not _offline_cache:
+        _load_offline_cache()
+    return list(_offline_cache)
 
 
 def clear_offline(discord_id: int) -> bool:
@@ -250,7 +262,9 @@ def clear_offline(discord_id: int) -> bool:
             "DELETE FROM offline_users WHERE discord_id = ?",
             (discord_id,),
         )
-        return cursor.rowcount > 0
+        was_offline = cursor.rowcount > 0
+    _offline_cache.discard(discord_id)
+    return was_offline
 
 
 def set_snake_charm_holder(discord_id: int) -> None:
@@ -1017,7 +1031,7 @@ async def _handle_multidraw(
     await message.channel.send("\n".join(lines))
 
 
-def _get_exclude_names(message: discord.Message) -> set[str]:
+async def _get_exclude_names(message: discord.Message) -> set[str]:
     """构建 /top 查询的排除名单：蛇符咒持有者 + 下线用户（按用户名）。"""
     exclude_names: set[str] = set()
     guild = message.guild
@@ -1025,11 +1039,11 @@ def _get_exclude_names(message: discord.Message) -> set[str]:
         return exclude_names
     snake_holder = get_snake_charm_holder()
     if snake_holder is not None:
-        member = guild.get_member(snake_holder)
+        member = await resolve_member_by_id(guild, snake_holder)
         if member:
             exclude_names.add(member.name)
     for discord_id in get_offline_users():
-        member = guild.get_member(discord_id)
+        member = await resolve_member_by_id(guild, discord_id)
         if member:
             exclude_names.add(member.name)
     return exclude_names
@@ -1039,7 +1053,7 @@ async def _get_top_quota_excluded(
     message: discord.Message, client: httpx.AsyncClient
 ) -> Optional[list[tuple[str, int]]]:
     """查询排行榜，服务端排除蛇符咒持有者和下线用户（不占用前十名额）。"""
-    return await query_top_quota(client, _get_exclude_names(message))
+    return await query_top_quota(client, await _get_exclude_names(message))
 
 
 async def _settle_weak(message: discord.Message, announce: bool = True) -> Optional[str]:
@@ -1112,12 +1126,7 @@ async def _settle_robinhood(
             continue
         # 皇家安保：无法被劫富济贫
         if guild:
-            member = guild.get_member_named(username)
-            if member is None:
-                member = discord.utils.find(
-                    lambda m: m.name == username or m.global_name == username,
-                    guild.members,
-                )
+            member = await resolve_member_by_name(guild, username)
             if member and has_royal_security_service(member.id):
                 lines.append(f"👑 {username} 有皇家安保，无法被劫富济贫！")
                 continue
@@ -1191,12 +1200,7 @@ async def _settle_depositking(
         guild = message.guild
         discord_id = None
         if guild:
-            member = guild.get_member_named(username)
-            if member is None:
-                member = discord.utils.find(
-                    lambda m: m.name == username or m.global_name == username,
-                    guild.members,
-                )
+            member = await resolve_member_by_name(guild, username)
             if member:
                 discord_id = member.id
         if discord_id is None:

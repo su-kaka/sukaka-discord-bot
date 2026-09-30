@@ -40,7 +40,7 @@ python bot.py
 ## 外部依赖
 
 - **活动额度 API**（`https://catiecli.sukaka.top`）：所有游戏点数的真实账本。机器人不自己记账（银行存款、卡牌、彩票奖池等本地 SQLite 除外），通过 `X-Activity-Quota-Key` 鉴权调用 grant/deduct/query/top 接口。接口详情见 [activity-quota-bot-api.md](activity-quota-bot-api.md)。
-- **SQLite 本地库**（项目根目录）：`gacha.db`（卡牌效果/下线状态/身体交换）、`bank.db`（银行存款/抢劫冷却）、`lottery.db`（奖池）、`quota_drops.db`（掉落冷却）、`mama.db`（家庭组登记）、`channel_mutes.db`（频道禁言记录）。
+- **SQLite 本地库**（默认集中存放在 `data/` 目录，`DATA_DIR` 环境变量可整体改址，见 `paths.py`）：`gacha.db`（卡牌效果/下线状态/身体交换）、`bank.db`（银行存款/抢劫冷却）、`lottery.db`（奖池）、`quota_drops.db`（掉落冷却）、`mama.db`（家庭组登记）、`channel_mutes.db`（频道禁言记录）。升级时项目根目录下的同名旧库会自动迁移入 `data/`。
 - **数据文件**：`docs/carousel-content.md`（轮播内容，整个文件作为一条消息发送）。
 
 ## 项目结构
@@ -61,6 +61,7 @@ roulette/               # 游戏区包（详见 roulette.md）
 ├── lottery.py / leaderboard.py / big_red_packet.py
 ├── packet_base.py       #   通用红包视图（用户红包/大红包/自爆红包共用）
 └── utils.py             #   随机分池、人机验证出题
+paths.py                # 数据目录统一解析（默认 ./data，DATA_DIR 可改址）
 docs/                   # 本文档目录
 .env                    # 环境变量（不入 Git）
 ```

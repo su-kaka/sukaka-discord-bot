@@ -20,6 +20,7 @@ from roulette.constants import (
     ROB_MIN_QUOTA,
 )
 from roulette.gacha import consume_effect, has_buff, has_effect, is_offline, remove_buff, steal_random_card
+from roulette.utils import resolve_member_by_id
 
 
 async def handle_rob(
@@ -86,7 +87,11 @@ async def handle_rob(
         ]
         if candidates:
             scapegoat_id = random.choice(candidates)
-            scapegoat = message.guild.get_member(scapegoat_id) if message.guild else None
+            scapegoat = (
+                await resolve_member_by_id(message.guild, scapegoat_id)
+                if message.guild
+                else None
+            )
             if scapegoat:
                 scapegoat_note = f"\n🎭 借刀杀人！{target.mention} 将抢劫转嫁给了 {scapegoat.mention}！"
                 target = scapegoat

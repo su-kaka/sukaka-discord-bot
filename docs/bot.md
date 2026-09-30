@@ -48,11 +48,20 @@ roulette 模块没有往 bot 上挂状态——它的冷却字典等全部闭包
 ## Intents 配置
 
 ```python
-intents = discord.Intents.default()
-intents.guilds = True        # 频道/服务器结构
-intents.members = True       # 成员列表（排行榜成员查找、fetch_member 兜底）——需在开发者后台开启 Privileged
-intents.message_content = True   # 读取消息内容（游戏关键词识别必需）——需在开发者后台开启 Privileged
+intents = discord.Intents.none()   # 从零开始，只开实际用到的事件流，最小化网关流量
+intents.guilds = True              # 频道/服务器结构（发消息、找频道必需）
+intents.members = True             # 成员变更事件——需在开发者后台开启 Privileged
+intents.message_content = True     # 读取消息内容（游戏关键词识别必需）——需在开发者后台开启 Privileged
 ```
+
+**不要用 `Intents.default()`**：它会附带 bans/emojis/integrations/webhooks/voice_states/DM 消息等本项目用不到的事件流，白白增加网关流量。
+
+另外 `SukakaBot.__init__` 里传了 `chunk_guilds_at_startup=False`：**不在启动时全量分块下载服务器成员列表**。万人服务器每次启动能省几十 MB 流量、大幅加快就绪速度。代价是 `guild.get_member()` / `guild.members` 缓存命中率低，**所有按 ID/用户名查成员的地方必须走 `roulette/utils.py` 的 REST 兜底**：
+
+- `resolve_member_by_id(guild, discord_id)`：缓存 → `guild.get_member` → `fetch_member`（REST）
+- `resolve_member_by_name(guild, username)`：缓存 → `guild.get_member_named` → REST `query_members` 前缀搜索后精确比对
+
+两者都带 5 分钟 TTL 内存缓存，避免频繁打 REST。新增「查成员」代码时一律用这两个函数，不要直接用 `guild.get_member` / `guild.members`（后者在未分块时基本是空的）。
 
 `members` 和 `message_content` 属于特权 Intent，除了代码里声明，还必须在 [Discord 开发者后台](https://discord.com/developers/applications) → Bot → Privileged Gateway Intents 中开启，否则启动报错或收不到消息。
 

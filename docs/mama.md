@@ -34,7 +34,7 @@ bot.on_ready
 
 ## 存储
 
-- SQLite `mama.db`（env `MAMA_DB` 可覆盖），import 时建表。
+- SQLite `data/mama.db`（env `MAMA_DB` 可覆盖），import 时建表。
 - 表 `mama_registrations`：`discord_id INTEGER PRIMARY KEY`（一人一条）、`display_name`（Select 菜单 label 用；mention 渲染永远显示当前名，改名后重新登记即可刷新）、`region`、`note`、`created_at`（首次登记时间，upsert 不覆盖）、`updated_at`。
 - 表 `mama_blocks`：`discord_id INTEGER PRIMARY KEY`（一人一条，`INSERT OR IGNORE` 幂等）、`blocked_at`（拉黑时间，列表展示用）。
 

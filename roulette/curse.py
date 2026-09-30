@@ -28,6 +28,7 @@ from roulette.gacha import (
     has_curse_eye,
     is_offline,
 )
+from roulette.utils import resolve_member_by_id
 
 
 async def handle_curse(
@@ -110,7 +111,11 @@ async def handle_curse(
         ]
         if candidates:
             scapegoat_id = random.choice(candidates)
-            scapegoat = message.guild.get_member(scapegoat_id) if message.guild else None
+            scapegoat = (
+                await resolve_member_by_id(message.guild, scapegoat_id)
+                if message.guild
+                else None
+            )
             if scapegoat:
                 scapegoat_note = f"\n🎭 借刀杀人！{target.mention} 将诅咒转嫁给了 {scapegoat.mention}！"
                 target = scapegoat

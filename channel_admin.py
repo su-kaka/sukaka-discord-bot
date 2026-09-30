@@ -6,11 +6,12 @@ import sqlite3
 import time
 import uuid
 from dataclasses import dataclass, field, replace
-from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
 import discord
 from discord import app_commands
+
+from paths import data_file
 
 logger = logging.getLogger("sukaka.channel_admin")
 
@@ -21,7 +22,7 @@ ALLOWED_CHANNEL_ID = 1293095144806940738
 DEFAULT_TIMEOUT_MINUTES = 30
 MAX_TIMEOUT_MINUTES = 24 * 60
 VOTE_THRESHOLD = 5
-DB_PATH = Path(os.getenv("CHANNEL_MUTES_DB", "channel_mutes.db"))
+DB_PATH = data_file("CHANNEL_MUTES_DB", "channel_mutes.db")
 CHANNEL_MUTE_PERMISSIONS = ("send_messages",)
 
 # 恢复任务注册表与写锁：channel_admin 模块私有，不挂在 bot 实例上

@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-import os
 import random
 import sqlite3
-from pathlib import Path
 
 import discord
 import httpx
 
+from paths import data_file
 from roulette.api import adjust_quota, query_quota
 from roulette.constants import (
     LOTTERY_BASE_POOL,
@@ -19,7 +18,7 @@ from roulette.constants import (
     LOTTERY_WIN_CHANCE,
 )
 
-DB_PATH = Path(os.getenv("LOTTERY_DB", LOTTERY_DB))
+DB_PATH = data_file("LOTTERY_DB", LOTTERY_DB)
 
 
 def _init_db() -> None:
