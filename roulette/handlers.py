@@ -47,6 +47,8 @@ from roulette.constants import (
     DUEL_TIMEOUT_SECONDS,
     GACHA_KEYWORD,
     GACHA_NOTYET_RECOVER,
+    HEAVEN_ALLIN_SUCCESS_CHANCE,
+    HOLY_BLADE_ALLIN_SUCCESS_CHANCE,
     LEADERBOARD_KEYWORD,
     LOTTERY_KEYWORD,
     MARRY_COOLDOWN_SECONDS,
@@ -56,7 +58,6 @@ from roulette.constants import (
     MARRY_MIN_FEE,
     MARRY_TIMEOUT_SECONDS,
     OFFLINE_KEYWORD,
-    PLAYER_COUNT,
     QUOTA_CHANNEL_ID,
     QUOTA_DROP_KEYWORD,
     RED_PACKET_COOLDOWN_SECONDS,
@@ -87,6 +88,7 @@ from roulette.gacha import (
     handle_seduce,
     handle_yourname,
     has_buff,
+    has_holy_blade,
     is_offline,
     remove_buff,
     restore_body_swaps,
@@ -376,10 +378,14 @@ def start_roulette(bot: "SukakaBot") -> None:
             stake = quota  # 全部额度作为赌注
             # 一念天堂生效：成功概率提升到 75%，成功翻三倍（覆盖祝福，祝福不消耗）
             heaven = consume_effect(message.author.id, "heaven")
+            # 圣剑生效：梭哈成功率常驻 75%（唯一道具，不消耗；优先级低于一念天堂）
+            holy_blade = has_holy_blade(message.author.id)
             # 祝福生效：成功概率提高到 75%（不与一念天堂叠加，倍率不变）
             bless = False if heaven else has_buff(message.author.id, "bless")
             if heaven:
-                success_chance = 0.75
+                success_chance = HEAVEN_ALLIN_SUCCESS_CHANCE
+            elif holy_blade:
+                success_chance = HOLY_BLADE_ALLIN_SUCCESS_CHANCE
             elif bless:
                 success_chance = BLESS_ALLIN_SUCCESS_CHANCE
             else:
@@ -413,6 +419,7 @@ def start_roulette(bot: "SukakaBot") -> None:
                 prize = gross_prize - fee
                 new_quota = await adjust_quota(client, "grant", message.author.name, prize)
                 heaven_note = "\n🃏 一念天堂生效！成功概率提升，翻三倍！" if heaven else ""
+                holy_note = "\n⚔️ 圣剑在手，梭哈成功率常驻 75%！" if holy_blade else ""
                 bless_note = ""
                 if bless:
                     # 梭哈结算后祝福消耗（一念天堂覆盖时祝福不消耗，保留在身上）
@@ -426,7 +433,7 @@ def start_roulette(bot: "SukakaBot") -> None:
                     return
                 await message.channel.send(
                     f"🎰🎉 {message.author.mention} 梭哈 **{quota} 点**\n"
-                    f"🃏 翻倍成功！毛奖金 **{gross_prize} 点**，手续费 {fee} 点（{ALLIN_FEE_PERCENT}%）销毁，实得 **{prize} 点**，当前额度 {new_quota} 点！{heaven_note}{bless_note}{retry_note}"
+                    f"🃏 翻倍成功！毛奖金 **{gross_prize} 点**，手续费 {fee} 点（{ALLIN_FEE_PERCENT}%）销毁，实得 **{prize} 点**，当前额度 {new_quota} 点！{heaven_note}{holy_note}{bless_note}{retry_note}"
                 )
             else:
                 # 时候未到！：归零时自动恢复 50 点

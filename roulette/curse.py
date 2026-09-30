@@ -22,7 +22,7 @@ from roulette.constants import (
     CURSE_EYE_QUOTA_MIN,
 )
 from roulette.gacha import (
-    add_buff,
+    add_buff_guarded,
     clear_curse_eye_holder,
     has_buff,
     has_curse_eye,
@@ -128,10 +128,13 @@ async def handle_curse(
         if scapegoat_note:
             curse_eye_note += f"\n👁️ 借刀杀人可以转嫁普通诅咒，但无法反弹 **诅咒之眼** 的凝视！"
 
-    add_buff(target.id, "curse")
+    # 圣剑守护：持有圣剑者免疫一切 debuff（诅咒无法附加）
+    holy_note = ""
+    if not add_buff_guarded(target.id, "curse"):
+        holy_note = f"\n⚔️ {target.mention} 圣剑在身，诅咒无法缠身！"
     await message.channel.send(
         f"🔮 {message.author.mention} 诅咒了 {target.mention}！\n"
-        f"{target.mention} 下次抢劫必被反杀、决斗必输、梭哈必输（生效一次后解除）。{scapegoat_note}{curse_eye_note}"
+        f"{target.mention} 下次抢劫必被反杀、决斗必输、梭哈必输（生效一次后解除）。{scapegoat_note}{curse_eye_note}{holy_note}"
     )
 
 

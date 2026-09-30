@@ -41,6 +41,7 @@ from roulette.constants import (
     D6_KEYWORD,
     D6_RECHARGE_COST,
     DIVINITY_EXHAUST_CHANCE,
+    HOLY_BLADE_ALLIN_SUCCESS_CHANCE,
     INFLATION_MIN_BALANCE,
     LORD_PARASOL_BREAK_CHANCE,
     MARRY_FEE_PERCENT,
@@ -66,7 +67,7 @@ CARD_POOL: dict[str, tuple[str, str, int]] = {
     "weak": ("虚弱", "下次被抢劫必定被抢成功", 10),
     "seduce": ("诱惑", "强制和某人结婚（50% 概率失败）", 10),
     "robinhood": ("劫富济贫", "排名前十的用户随机分你他们额度的 1%-10%", 10),
-    "multidraw": ("十连抽", "下次抽卡自动抽十次", 10),
+    "multidraw": ("十连抽", "下次抽卡自动抽十次", 5),
     "avatar": ("天神下凡", "下次抢银行成功率翻倍", 10),
     "selfdestruct": ("自爆", f"额度归零，随机销毁 {GACHA_SELFDESTRUCT_MIN_PERCENT}%-{GACHA_SELFDESTRUCT_MAX_PERCENT}%，剩余生成红包供所有人抢", 10),
     "snake": ("蛇符咒", "排行榜隐身，不会被劫富济贫，效果永久（唯一道具，直到下一个人抽到）", 5),
@@ -82,7 +83,7 @@ CARD_POOL: dict[str, tuple[str, str, int]] = {
     "yourname": ("你的名字", "【超稀有道具】使用 `你的名字@某人` 和某人交换身体：双方交换所有额度/卡牌/银行存款，5 分钟后换回，期间双方不能再被你的名字影响", 1),
     "inflation": ("通货膨胀", f"若银行存在存款 > {INFLATION_MIN_BALANCE} 点的用户，所有人存款数值减半", 5),
     "depositking": ("存为王", "排行榜前十名用户自动存款一次（额度的 50% 存入银行）", 5),
-    "sellout": ("变卖家产", f"随机卖掉若干种道具的全部数量（含蛇符咒/会员卡/流星雨/收藏家/诅咒之眼/神性/D6/领主阳伞），每张 {GACHA_SELLOUT_PRICE} 点额度", 10),
+    "sellout": ("变卖家产", f"随机卖掉若干种道具的全部数量（含蛇符咒/会员卡/流星雨/收藏家/诅咒之眼/神性/D6/领主阳伞/石中剑/圣剑），每张 {GACHA_SELLOUT_PRICE} 点额度", 10),
     "offline": ("下线", f"【特殊道具】额度超过 {OFFLINE_MIN_QUOTA} 才能使用：额度重置为 {OFFLINE_RESET_QUOTA}，银行存款清空，无法进行任何操作，下次任意发言解除下线状态", 5),
     "wishingpool": ("许愿池", f"从三个栏目（唯一道具/即时生效卡/背包道具卡）中任选一张，{GACHA_WISHING_TIMEOUT_SECONDS} 秒内未选视为放弃", 5),
     "collector": ("收藏家", "抽卡得到的背包道具可叠加次数：重复抽到相同道具时次数 +1（无收藏家时重复抽到不叠加，但保留已有数量不会重置）（唯一道具，直到下一个人抽到）", 5),
@@ -90,15 +91,17 @@ CARD_POOL: dict[str, tuple[str, str, int]] = {
     "divinity": ("神性", f"抽到即解除身上的诅咒，解锁 `祝福 @某人` 能力：被祝福者梭哈成功率提高到 75%（无法和一念天堂叠加，一念天堂会覆盖祝福），每次祝福有 {round(DIVINITY_EXHAUST_CHANCE*100, 2)}% 概率神力耗尽（唯一道具，直到下一个人抽到）", 5),
     "d6": ("D6", f"发送「{D6_KEYWORD}」掷骰重置身上的道具与状态：数量不变、种类改变（唯一道具重置为其他唯一道具、背包道具重置为其他背包道具、状态 buff 重置为其他状态 buff），每次使用需 {D6_RECHARGE_COST} 点充能（唯一道具，直到下一个人抽到）", 5),
     "lordparasol": ("领主阳伞", f"黑市购买任意物品免费，每次购买有 {round(LORD_PARASOL_BREAK_CHANCE*100, 2)}% 概率破损（唯一道具，直到破损或下一个人抽到）", 5),
+    "swordstone": ("石中剑", "无效果，静静等待着觉醒；与神性同持时融合成圣剑（唯一道具，直到下一个人抽到）", 5),
+    "holyblade": ("圣剑", f"石中剑与神性融合而成：梭哈成功率常驻 {round(HOLY_BLADE_ALLIN_SUCCESS_CHANCE*100)}%，驱散并免疫一切 debuff（诅咒/虚弱/仇恨）（唯一道具，不能被抽卡/许愿池抽出，只能由融合或 D6 掷出，直到下一个人抢走/变卖/D6 重置）", 0),  # 权重 0：圣剑不可被抽卡抽出
     "blank": ("空白", "无效果", 40),  # 实际概率由 GACHA_BLANK_CHANCE 控制
 }
 
-# 许愿池可选范围：空白与许愿池本身不可选
-WISHING_EXCLUDED_CARDS = {"blank", "wishingpool"}
+# 许愿池可选范围：空白与许愿池本身不可选，圣剑只能由融合或 D6 掷出
+WISHING_EXCLUDED_CARDS = {"blank", "wishingpool", "holyblade"}
 # 抽中即结算的卡牌（选择后立即触发，不进背包）；虚弱抽中即附加为状态 buff
 INSTANT_SETTLE_CARDS = {"robinhood", "selfdestruct", "error", "inflation", "depositking", "sellout", "weak"}
-# 唯一道具卡牌（选择后立即替换持有者，不进背包）
-UNIQUE_CARDS = {"snake", "membership", "meteor", "collector", "curseeye", "divinity", "d6", "lordparasol"}
+# 唯一道具卡牌（选择后立即替换持有者，不进背包）；圣剑权重 0 不会被抽中，但 D6 重置候选包含它
+UNIQUE_CARDS = {"snake", "membership", "meteor", "collector", "curseeye", "divinity", "d6", "lordparasol", "swordstone", "holyblade"}
 # 背包道具卡牌集合（D6 重置背包道具时的候选范围：卡池去掉唯一道具/即时结算卡/空白与许愿池）
 BAG_CARDS = set(CARD_POOL) - UNIQUE_CARDS - INSTANT_SETTLE_CARDS - WISHING_EXCLUDED_CARDS
 
@@ -110,6 +113,9 @@ BUFF_POOL: dict[str, tuple[str, str]] = {
     # 仇恨：抢银行得手后附加，下次存钱被强制没收（存钱时消耗）
     "hatred": ("仇恨", "抢银行得手后被地精银行盯上，下次存钱将被强制没收"),
 }
+
+# debuff 类 buff（持有圣剑时免疫）：诅咒/虚弱/仇恨；祝福为增益不受影响
+DEBUFF_BUFFS = {"curse", "weak", "hatred"}
 
 
 def _init_db() -> None:
@@ -192,6 +198,24 @@ def _init_db() -> None:
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS lord_parasol_holder (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                discord_id INTEGER NOT NULL,
+                created_at REAL NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS sword_stone_holder (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                discord_id INTEGER NOT NULL,
+                created_at REAL NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS holy_blade_holder (
                 id INTEGER PRIMARY KEY CHECK (id = 1),
                 discord_id INTEGER NOT NULL,
                 created_at REAL NOT NULL
@@ -540,6 +564,101 @@ def clear_lord_parasol_holder() -> None:
         conn.execute("DELETE FROM lord_parasol_holder WHERE id = 1")
 
 
+def set_sword_stone_holder(discord_id: int) -> None:
+    """设置石中剑唯一持有者（覆盖旧持有者）。"""
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute(
+            """
+            INSERT INTO sword_stone_holder (id, discord_id, created_at)
+            VALUES (1, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                discord_id = excluded.discord_id,
+                created_at = excluded.created_at
+            """,
+            (discord_id, time.time()),
+        )
+
+
+def get_sword_stone_holder() -> Optional[int]:
+    """查询当前石中剑持有者，无持有者返回 None。"""
+    with sqlite3.connect(DB_PATH) as conn:
+        row = conn.execute(
+            "SELECT discord_id FROM sword_stone_holder WHERE id = 1"
+        ).fetchone()
+    return row[0] if row else None
+
+
+def has_sword_stone(discord_id: int) -> bool:
+    """是否持有石中剑（唯一道具）。"""
+    return get_sword_stone_holder() == discord_id
+
+
+def clear_sword_stone_holder() -> None:
+    """销毁石中剑（清除持有记录）。"""
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute("DELETE FROM sword_stone_holder WHERE id = 1")
+
+
+def set_holy_blade_holder(discord_id: int) -> None:
+    """设置圣剑唯一持有者（覆盖旧持有者）。"""
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute(
+            """
+            INSERT INTO holy_blade_holder (id, discord_id, created_at)
+            VALUES (1, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                discord_id = excluded.discord_id,
+                created_at = excluded.created_at
+            """,
+            (discord_id, time.time()),
+        )
+
+
+def get_holy_blade_holder() -> Optional[int]:
+    """查询当前圣剑持有者，无持有者返回 None。"""
+    with sqlite3.connect(DB_PATH) as conn:
+        row = conn.execute(
+            "SELECT discord_id FROM holy_blade_holder WHERE id = 1"
+        ).fetchone()
+    return row[0] if row else None
+
+
+def has_holy_blade(discord_id: int) -> bool:
+    """是否持有圣剑（唯一道具）。"""
+    return get_holy_blade_holder() == discord_id
+
+
+def add_buff_guarded(discord_id: int, buff_key: str) -> bool:
+    """圣剑守护的 add_buff：持有圣剑时 debuff 无法附加（返回 False），其余正常附加。"""
+    if buff_key in DEBUFF_BUFFS and has_holy_blade(discord_id):
+        return False
+    add_buff(discord_id, buff_key)
+    return True
+
+
+def purge_debuffs(discord_id: int) -> list[str]:
+    """驱散身上全部 debuff（诅咒/虚弱/仇恨），返回被驱散的 buff 名称列表。"""
+    purged = []
+    for buff_key in DEBUFF_BUFFS:
+        if remove_buff(discord_id, buff_key):
+            purged.append(BUFF_POOL[buff_key][0])
+    return purged
+
+
+def try_fuse_holy_blade(discord_id: int) -> bool:
+    """融合检查：石中剑与神性同持时融合成圣剑（两者持有记录清除，圣剑归该用户）。
+
+    返回是否发生了融合。"""
+    if has_sword_stone(discord_id) and has_divinity(discord_id):
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.execute("DELETE FROM sword_stone_holder WHERE id = 1")
+            conn.execute("DELETE FROM divinity_holder WHERE id = 1")
+        set_holy_blade_holder(discord_id)
+        purge_debuffs(discord_id)
+        return True
+    return False
+
+
 # 唯一道具持有者存取映射：card_key -> (setter, getter, has, 表名)
 UNIQUE_HOLDER_ACCESSORS = {
     "snake": (set_snake_charm_holder, get_snake_charm_holder, has_snake_charm, "snake_charm_holder"),
@@ -550,6 +669,8 @@ UNIQUE_HOLDER_ACCESSORS = {
     "divinity": (set_divinity_holder, get_divinity_holder, has_divinity, "divinity_holder"),
     "d6": (set_d6_holder, get_d6_holder, has_d6, "d6_holder"),
     "lordparasol": (set_lord_parasol_holder, get_lord_parasol_holder, has_lord_parasol, "lord_parasol_holder"),
+    "swordstone": (set_sword_stone_holder, get_sword_stone_holder, has_sword_stone, "sword_stone_holder"),
+    "holyblade": (set_holy_blade_holder, get_holy_blade_holder, has_holy_blade, "holy_blade_holder"),
 }
 
 
@@ -714,6 +835,10 @@ def steal_random_card(robber_id: int, target_id: int) -> Optional[str]:
         candidates.append("d6")
     if has_lord_parasol(target_id):
         candidates.append("lordparasol")
+    if has_sword_stone(target_id):
+        candidates.append("swordstone")
+    if has_holy_blade(target_id):
+        candidates.append("holyblade")
     if not candidates:
         return None
     card_key = random.choice(candidates)
@@ -733,10 +858,16 @@ def steal_random_card(robber_id: int, target_id: int) -> Optional[str]:
         set_d6_holder(robber_id)
     elif card_key == "lordparasol":
         set_lord_parasol_holder(robber_id)
+    elif card_key == "swordstone":
+        set_sword_stone_holder(robber_id)
+    elif card_key == "holyblade":
+        set_holy_blade_holder(robber_id)
     else:
         # 偷来的道具叠加到自己的背包（+1），不重置已有数量
         consume_effect(target_id, card_key)
         _stack_effect(robber_id, card_key, 1)
+    # 偷到石中剑/神性时，若与手中另一半配对则融合成圣剑
+    try_fuse_holy_blade(robber_id)
     name, _, _ = CARD_POOL.get(card_key, (card_key, "", 0))
     return name
 
@@ -898,13 +1029,20 @@ async def handle_gacha(
         )
         return
 
-    # 神性：唯一道具，立即替换持有者，并解除身上的诅咒
+    # 神性：唯一道具，立即替换持有者，并解除身上的诅咒；与石中剑同持时融合成圣剑
     if card_key == "divinity":
         old_holder = get_divinity_holder()
         set_divinity_holder(message.author.id)
         transfer_note = ""
         if old_holder and old_holder != message.author.id:
             transfer_note = f"\n✨ 神性已从 <@{old_holder}> 手中转移！"
+        if try_fuse_holy_blade(message.author.id):
+            await message.channel.send(
+                f"🎴 {message.author.mention} 消耗 {cost} 点抽卡……\n"
+                f"✨ **神性**入手！但 **石中剑** 与之共鸣——\n"
+                f"⚡✨ **石中剑与神性融合成圣剑！**梭哈成功率常驻 75%，驱散并免疫一切 debuff！{transfer_note}"
+            )
+            return
         purge_note = "\n🔮 抽到神性，身上缠绕的诅咒已解除！" if remove_buff(message.author.id, "curse") else ""
         await message.channel.send(
             f"🎴 {message.author.mention} 消耗 {cost} 点抽卡……\n"
@@ -938,6 +1076,26 @@ async def handle_gacha(
             f"⛱️ **{name}**！{desc}。{transfer_note}\n"
             f"🌒 现在发送「{BLACK_MARKET_KEYWORD}」购物免费，但阳伞随时可能破损！"
         )
+        return
+
+    # 石中剑：唯一道具，无效果；与神性同持时融合成圣剑
+    if card_key == "swordstone":
+        old_holder = get_sword_stone_holder()
+        set_sword_stone_holder(message.author.id)
+        transfer_note = ""
+        if old_holder and old_holder != message.author.id:
+            transfer_note = f"\n🗡️ 石中剑已从 <@{old_holder}> 手中转移！"
+        if try_fuse_holy_blade(message.author.id):
+            await message.channel.send(
+                f"🎴 {message.author.mention} 消耗 {cost} 点抽卡……\n"
+                f"🗡️ **石中剑**入手！但 **神性** 与之共鸣——\n"
+                f"⚡✨ **石中剑与神性融合成圣剑！**梭哈成功率常驻 75%，驱散并免疫一切 debuff！{transfer_note}"
+            )
+        else:
+            await message.channel.send(
+                f"🎴 {message.author.mention} 消耗 {cost} 点抽卡……\n"
+                f"🗡️ **{name}**！{desc}。{transfer_note}"
+            )
         return
 
     # 错误：立即结算，额度重置为随机值
@@ -1049,6 +1207,9 @@ async def _handle_multidraw(
             old_holder = get_divinity_holder()
             set_divinity_holder(message.author.id)
             transfer_note = f"（从 <@{old_holder}> 手中转移）" if old_holder and old_holder != message.author.id else ""
+            if try_fuse_holy_blade(message.author.id):
+                lines.append(f"{i+1}. ✨ **神性**入手！与 **石中剑** 共鸣，⚡✨ 融合成 **圣剑**！梭哈成功率常驻 75%，驱散并免疫一切 debuff！{transfer_note}")
+                continue
             purge_note = "（诅咒已解除）" if remove_buff(message.author.id, "curse") else ""
             lines.append(f"{i+1}. ✨ **{name}**！{desc}{transfer_note}{purge_note}")
             continue
@@ -1065,6 +1226,16 @@ async def _handle_multidraw(
             set_lord_parasol_holder(message.author.id)
             transfer_note = f"（从 <@{old_holder}> 手中转移）" if old_holder and old_holder != message.author.id else ""
             lines.append(f"{i+1}. ⛱️ **{name}**！{desc}{transfer_note}")
+            continue
+
+        if card_key == "swordstone":
+            old_holder = get_sword_stone_holder()
+            set_sword_stone_holder(message.author.id)
+            transfer_note = f"（从 <@{old_holder}> 手中转移）" if old_holder and old_holder != message.author.id else ""
+            if try_fuse_holy_blade(message.author.id):
+                lines.append(f"{i+1}. 🗡️ **石中剑**入手！与 **神性** 共鸣，⚡✨ 融合成 **圣剑**！梭哈成功率常驻 75%，驱散并免疫一切 debuff！{transfer_note}")
+            else:
+                lines.append(f"{i+1}. 🗡️ **{name}**！{desc}{transfer_note}")
             continue
 
         if card_key == "error":
@@ -1088,8 +1259,10 @@ async def _handle_multidraw(
             continue
 
         if card_key == "weak":
-            add_buff(message.author.id, "weak")
-            lines.append(f"{i+1}. 🤒 **{name}**！{desc}（已附加为身上状态）")
+            if add_buff_guarded(message.author.id, "weak"):
+                lines.append(f"{i+1}. 🤒 **{name}**！{desc}（已附加为身上状态）")
+            else:
+                lines.append(f"{i+1}. 🤒 **{name}**！⚔️ 圣剑在身，虚弱无法缠身！")
             continue
 
         remaining, stacked = _add_effect_on_draw(message.author.id, card_key)
@@ -1132,12 +1305,15 @@ async def _get_top_quota_excluded(
 async def _settle_weak(message: discord.Message, announce: bool = True) -> Optional[str]:
     """虚弱：立即附加虚弱状态 buff（下次被抢劫必定被抢成功），不进背包。
 
+    圣剑持有者免疫 debuff，虚弱无法附加。
     announce=False 时不播报，返回效果文本（黑市购买时由调用方播报）。"""
-    add_buff(message.author.id, "weak")
     name, desc, _ = CARD_POOL["weak"]
-    effect_text = (
-        f"🌀 **{name}** 已附加为身上状态（不可被偷取/变卖/交换），用 `我的卡牌` 查看。"
-    )
+    if not add_buff_guarded(message.author.id, "weak"):
+        effect_text = f"⚔️ **圣剑**在身，**{name}** 无法缠身！"
+    else:
+        effect_text = (
+            f"🌀 **{name}** 已附加为身上状态（不可被偷取/变卖/交换），用 `我的卡牌` 查看。"
+        )
     if not announce:
         return effect_text
     await message.channel.send(
@@ -1361,6 +1537,10 @@ async def _settle_sellout(
         items.append(("d6", 1, True))
     if has_lord_parasol(message.author.id):
         items.append(("lordparasol", 1, True))
+    if has_sword_stone(message.author.id):
+        items.append(("swordstone", 1, True))
+    if has_holy_blade(message.author.id):
+        items.append(("holyblade", 1, True))
 
     if not items:
         await message.channel.send("🏷️ 你身上没有任何道具卡牌，变卖家产无效果。")
@@ -1384,6 +1564,8 @@ async def _settle_sellout(
                 "divinity": "divinity_holder",
                 "d6": "d6_holder",
                 "lordparasol": "lord_parasol_holder",
+                "swordstone": "sword_stone_holder",
+                "holyblade": "holy_blade_holder",
             }[card_key]
             with sqlite3.connect(DB_PATH) as conn:
                 conn.execute(
@@ -1846,6 +2028,16 @@ async def handle_d6(message: discord.Message, client: httpx.AsyncClient) -> None
         # 重置成神性时解除身上的诅咒（与抽到神性行为一致）
         if new_key == "divinity":
             remove_buff(message.author.id, "curse")
+        # 重置成圣剑时驱散并免疫一切 debuff（圣剑只能由 D6 掷出或融合获得）
+        if new_key == "holyblade":
+            purged = purge_debuffs(message.author.id)
+            if purged:
+                unique_lines.append(f"• **{old_name}** → **圣剑**⚡✨（debuff 已驱散：{'、'.join(purged)}）")
+                continue
+        # 石中剑与神性同持时融合成圣剑（D6 掷出配对时同样触发）
+        if new_key in {"swordstone", "divinity"} and try_fuse_holy_blade(message.author.id):
+            unique_lines.append(f"• **{old_name}** → **{CARD_POOL[new_key][0]}**，与神性/石中剑共鸣，⚡✨ 融合成 **圣剑**！")
+            continue
         new_name = CARD_POOL[new_key][0]
         steal_note = (
             f"（从 <@{prev_holder}> 手中夺得）"
@@ -1853,6 +2045,10 @@ async def handle_d6(message: discord.Message, client: httpx.AsyncClient) -> None
             else ""
         )
         unique_lines.append(f"• **{old_name}** → **{new_name}**{steal_note}")
+
+    # 兜底融合检查：多个唯一道具重置后可能恰好掷出石中剑+神性的组合
+    if try_fuse_holy_blade(message.author.id):
+        unique_lines.append("⚡✨ **石中剑与神性共鸣，融合成圣剑！**梭哈成功率常驻 75%，驱散并免疫一切 debuff！")
 
     # 重置背包道具：先删除全部记录，再按原数量重新掷骰（撞车自动合并）
     bag_lines: list[str] = []
@@ -1872,7 +2068,7 @@ async def handle_d6(message: discord.Message, client: httpx.AsyncClient) -> None
 
     # 重置身上状态 buff：种类改变（buff 为单实例状态不叠加，候选耗尽保持不变）
     buff_lines: list[str] = []
-    # 唯一道具重置期间可能解除诅咒（重置成神性），这里重新读取当前身上的状态
+    # 唯一道具重置期间可能解除诅咒（重置成神性）或融合出圣剑（驱散全部 debuff），这里重新读取当前身上的状态
     current_buffs = get_user_buffs(message.author.id)
     if current_buffs:
         used_buff_targets: set[str] = set()
@@ -1888,7 +2084,11 @@ async def handle_d6(message: discord.Message, client: httpx.AsyncClient) -> None
             new_key = random.choice(candidates)
             used_buff_targets.add(new_key)
             remove_buff(message.author.id, old_key)
-            add_buff(message.author.id, new_key)
+            # 持有圣剑时免疫 debuff：候选不排除，掷出 debuff 直接被圣剑驱散（不入身）
+            if not add_buff_guarded(message.author.id, new_key):
+                new_name = BUFF_POOL[new_key][0]
+                buff_lines.append(f"• **{old_name}** → **{new_name}**⚔️（圣剑在身，直接驱散！）")
+                continue
             new_name = BUFF_POOL[new_key][0]
             buff_lines.append(f"• **{old_name}** → **{new_name}**")
 
@@ -2002,6 +2202,17 @@ class WishPoolView(discord.ui.View):
             old_holder = getter()
             setter(self.user_id)
             transfer_note = f"\n⏭️ 已从 <@{old_holder}> 手中转移！" if old_holder and old_holder != self.user_id else ""
+            # 石中剑与神性同持时融合成圣剑
+            if card_key in {"swordstone", "divinity"} and try_fuse_holy_blade(self.user_id):
+                await interaction.response.edit_message(
+                    content=(
+                        f"🌠 <@{self.user_id}> 从许愿池选中了 **{name}**！与之相伴的道具共鸣——\n"
+                        f"⚡✨ **石中剑与神性融合成圣剑！**梭哈成功率常驻 75%，驱散并免疫一切 debuff！{transfer_note}"
+                    ),
+                    view=self,
+                )
+                self.stop()
+                return
             if card_key == "divinity" and remove_buff(self.user_id, "curse"):
                 transfer_note += "\n🔮 抽到神性，身上缠绕的诅咒已解除！"
             await interaction.response.edit_message(

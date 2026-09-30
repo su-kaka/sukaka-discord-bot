@@ -16,7 +16,7 @@ from roulette.bank import (
     get_richest_accounts,
     mark_heist_cooldown,
 )
-from roulette.gacha import add_buff, consume_effect, is_offline
+from roulette.gacha import add_buff_guarded, consume_effect, is_offline
 from roulette.constants import (
     BANK_HEIST_AUTO_INTERVAL_SECONDS,
     BANK_HEIST_BASE_SUCCESS,
@@ -278,8 +278,8 @@ class BankHeistView(discord.ui.View):
                 member_shares.append(
                     f"{user.mention} 返还 {cost} + 分得 {share} = **{total_return} 点**（发放失败，请联系管理员）"
                 )
-            # 标记仇恨（状态 buff，存 gacha.db 的 active_buffs 表）
-            add_buff(user.id, "hatred")
+            # 标记仇恨（状态 buff，存 gacha.db 的 active_buffs 表）；圣剑持有者免疫 debuff
+            add_buff_guarded(user.id, "hatred")
 
         # 发送结果
         result_text = (
