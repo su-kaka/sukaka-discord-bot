@@ -117,7 +117,7 @@ start_roulette(bot)
 
 机器人已做以下省流量/提速处理，新增代码时务必沿用：
 
-- **Intents 最小化**（见 [bot.md](bot.md) 的「Intents 配置」）：`Intents.none()` 起步只开 `guilds`/`members`/`message_content`，不订阅 bans/emojis/voice_states 等无用事件流。
+- **Intents 最小化**（见 [bot.md](bot.md) 的「Intents 配置」）：`Intents.none()` 起步只开 `guilds`/`guild_messages`/`members`/`message_content`，不订阅 bans/emojis/voice_states 等无用事件流。**坑：`guild_messages` 控制 `on_message` 事件本身，`none()` 起步漏开它 = bot 对消息完全无响应且无任何报错。**
 - **关闭启动全量成员分块**（`chunk_guilds_at_startup=False`）：不再启动时下载全服成员列表；**副作用是 `guild.get_member()`/`guild.members` 基本查不到人**，所有按 ID/用户名解析成员的地方必须用 `utils.resolve_member_by_id` / `utils.resolve_member_by_name`（缓存 → 成员缓存 → REST 兜底，5 分钟 TTL）。
 - **下线状态内存缓存**（`gacha.py` 的 `_offline_cache`）：`is_offline` 在 `on_message` 里每条消息都要调用，改为进程内 set 查询，不再每次开 SQLite 连接；写入仍同步落库（重启不丢），但**只能**通过 `set_offline`/`clear_offline` 修改，绕过它们直接改 `offline_users` 表会导致缓存失效。
 - 消息处理只走注册频道分发（`bot.register_message_handler`），未注册频道零开销；但注意 Discord 网关**无法按频道订阅**，`message_content` 开着时全服消息事件仍会到达客户端（这是平台限制，省不掉）。

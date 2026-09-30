@@ -40,7 +40,7 @@ python bot.py
 ## 外部依赖
 
 - **活动额度 API**（`https://catiecli.sukaka.top`）：所有游戏点数的真实账本。机器人不自己记账（银行存款、卡牌、彩票奖池等本地 SQLite 除外），通过 `X-Activity-Quota-Key` 鉴权调用 grant/deduct/query/top 接口。接口详情见 [activity-quota-bot-api.md](activity-quota-bot-api.md)。
-- **SQLite 本地库**（默认集中存放在 `data/` 目录，`DATA_DIR` 环境变量可整体改址，见 `paths.py`）：`gacha.db`（卡牌效果/下线状态/身体交换）、`bank.db`（银行存款/抢劫冷却）、`lottery.db`（奖池）、`quota_drops.db`（掉落冷却）、`mama.db`（家庭组登记）、`channel_mutes.db`（频道禁言记录）。升级时项目根目录下的同名旧库会自动迁移入 `data/`。
+- **SQLite 本地库**（默认集中存放在 `data/` 目录，`DATA_DIR` 环境变量可整体改址，见 `paths.py`）：`gacha.db`（卡牌效果/下线状态/身体交换）、`bank.db`（银行存款/抢劫冷却）、`lottery.db`（奖池）、`quota_drops.db`（掉落冷却）、`mama.db`（家庭组登记）、`channel_mutes.db`（频道禁言记录）。
 - **数据文件**：`docs/carousel-content.md`（轮播内容，整个文件作为一条消息发送）。
 
 ## 项目结构

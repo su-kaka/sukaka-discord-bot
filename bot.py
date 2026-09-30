@@ -28,12 +28,16 @@ class SukakaBot(discord.Client):
     def __init__(self) -> None:
         # 只开实际用到的事件流，收窄网关流量（详见 docs/bot.md「Intents 配置」）：
         # - guilds：频道/服务器结构（发消息、找频道必需）
+        # - guild_messages：服务器消息事件（MESSAGE_CREATE）—— on_message 触发源，必需！
+        #   注意：message_content 只解锁消息的「内容字段」，消息「事件本身」由
+        #   guild_messages 控制；Intents.default() 内含它，none() 不含，极易漏开。
         # - members：成员变更事件（成员解析 REST 兜底仍可用，无需全量缓存）
         # - message_content：读取消息内容（游戏关键词识别必需）
         # 注意：default() 会附带 bans/emojis/integrations/webhooks/voice_states
         # 等本项目用不到的事件流，全部省掉。
         intents = discord.Intents.none()
         intents.guilds = True
+        intents.guild_messages = True
         intents.members = True
         intents.message_content = True
         super().__init__(

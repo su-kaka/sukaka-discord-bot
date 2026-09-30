@@ -50,11 +50,14 @@ roulette 模块没有往 bot 上挂状态——它的冷却字典等全部闭包
 ```python
 intents = discord.Intents.none()   # 从零开始，只开实际用到的事件流，最小化网关流量
 intents.guilds = True              # 频道/服务器结构（发消息、找频道必需）
+intents.guild_messages = True       # 服务器消息事件（MESSAGE_CREATE）—— on_message 触发源，必需！
 intents.members = True             # 成员变更事件——需在开发者后台开启 Privileged
 intents.message_content = True     # 读取消息内容（游戏关键词识别必需）——需在开发者后台开启 Privileged
 ```
 
 **不要用 `Intents.default()`**：它会附带 bans/emojis/integrations/webhooks/voice_states/DM 消息等本项目用不到的事件流，白白增加网关流量。
+
+**大坑预警**：`message_content`（特权）只解锁消息事件的**内容字段**；消息**事件本身**由**非特权**的 `guild_messages` 控制。`Intents.default()` 内含 `guild_messages` 所以平时感觉不到它的存在，而 `Intents.none()` 不含——漏开后 `on_message` 完全不触发、bot 对任何消息无响应，且不报任何错。从 `default()` 换成 `none()` 起步时**必须显式补上 `guild_messages`**。
 
 另外 `SukakaBot.__init__` 里传了 `chunk_guilds_at_startup=False`：**不在启动时全量分块下载服务器成员列表**。万人服务器每次启动能省几十 MB 流量、大幅加快就绪速度。代价是 `guild.get_member()` / `guild.members` 缓存命中率低，**所有按 ID/用户名查成员的地方必须走 `roulette/utils.py` 的 REST 兜底**：
 
