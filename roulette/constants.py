@@ -90,7 +90,7 @@ D6_KEYWORD = "D6"
 D6_RECHARGE_COST = 66  # D6：每次使用的充能额度
 OFFLINE_KEYWORD = "下线"
 OFFLINE_MIN_QUOTA = 2000  # 使用下线卡牌的最低额度要求
-OFFLINE_RESET_QUOTA = 400  # 下线后额度重置值
+OFFLINE_RESET_QUOTA = 1000  # 下线后额度重置值
 
 BLACK_MARKET_KEYWORD = "黑市"
 BLACK_MARKET_DB = "black_market.db"
@@ -161,5 +161,5 @@ QUOTA_DROP_DEDUCT_MAX = 100  # 单次扣减点数上限
 QUOTA_DROP_COOLDOWN_MIN_SECONDS = 30  # 单用户掉落冷却下限（秒）
 QUOTA_DROP_COOLDOWN_MAX_SECONDS = 180  # 单用户掉落冷却上限（秒）
 QUOTA_DROP_NOTIFY_DELETE_AFTER = 10  # 掉落通知自动删除时间（秒）
-QUOTA_DROP_MIN_SEND_INTERVAL = 0.5  # 批量通知最小发送间隔（秒）
-QUOTA_DROP_MAX_BATCH_CHARS = 1800  # 批量通知单条消息字符上限（Discord 限 2000，留余量）
+QUOTA_DROP_DAILY_BONUS = 200  # 每个自然日（北京时间）第一次「来财」必定掉落的点数
+QUOTA_DROP_DAILY_UTC_OFFSET_SECONDS = 8 * 3600  # 北京时间相对 UTC 的固定偏移（无夏令时）

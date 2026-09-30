@@ -21,7 +21,7 @@ start_roulette(bot)
 | `handlers.py` | 520 | 消息入口：关键词分发、梭哈/红包/乞讨/庄家的内联逻辑、各冷却字典 |
 | `constants.py` | 145 | **所有可调参数**：关键词、点数、概率、冷却、阈值、DB 文件名 |
 | `api.py` | 71 | 活动额度 API 封装：`query_quota` / `adjust_quota` / `query_top_quota` |
-| `quota_drop.py` | 176 | 「来财」关键词掉落：30% 掉 0 点、10% 扣减事件、SQLite 原子冷却、通知合并发送 |
+| `quota_drop.py` | 176 | 「来财」关键词掉落：30% 掉 0 点、10% 扣减事件、SQLite 原子冷却、每日首次保底、通知逐条发送 |
 | `dice_game.py` | 140 | 赌大小：与庄家（玩家或机器人）各押 5 点 roll 点比大小 |
 | `beg.py` | 96 | 乞讨：按钮施舍，乞讨者 +5、施舍者 -7 |
 | `duel.py` | 193 | 决斗：押额度较少方全部，赢家得 80% |
@@ -94,9 +94,9 @@ start_roulette(bot)
 
 ## 「来财」掉落（quota_drop.py）
 
-- 发送 `来财` 关键词触发（`QUOTA_DROP_KEYWORD`，精确匹配）：30% 概率掉 0 点，否则掉 1–50 点；另有 10% 概率变成「扣减 1–50 点」事件。执行了游戏命令的发言不会触发掉落（命令分支全部提前 return）；刚解除下线的那条发言也不掉落（`skip_drop`）。
-- 单用户冷却 30–180 秒随机，用 SQLite `INSERT ... ON CONFLICT ... WHERE` 原子写入（`quota_drops.db`）。流星雨持有者**完全无视冷却**：每次「来财」必定掉落 1–50 点（不掉 0、免疫 10% 扣减事件），每次掉落后 `METEOR_DISSIPATE_CHANCE`（22.22%）概率**星光消散**（流星雨销毁并播报）。
-- 通知**批量合并发送**：模块级缓冲区 + 每 0.5 秒刷新一次，按 1800 字符拆分（Discord 2000 上限留余量），发完 10 秒自动删除。
+- 发送 `来财` 关键词触发（`QUOTA_DROP_KEYWORD`，精确匹配）：**每个自然日（北京时间，`QUOTA_DROP_DAILY_UTC_OFFSET_SECONDS`）第一次「来财」必定掉落 `QUOTA_DROP_DAILY_BONUS`（200）点**（优先于流星雨与随机掉落，发放失败会回滚每日记录供当日重试）；之后每次 30% 概率掉 0 点，否则掉 1–100 点；另有 10% 概率变成「扣减 1–100 点」事件。执行了游戏命令的发言不会触发掉落（命令分支全部提前 return）；刚解除下线的那条发言也不掉落（`skip_drop`）。每日首次同样进入随机冷却，且对流星雨持有者也判定星光消散。
+- 单用户冷却 30–180 秒随机，用 SQLite `INSERT ... ON CONFLICT ... WHERE` 原子写入（`quota_drops.db`）；每日首次记录用同样的原子 upsert 写入 `daily_first_drops` 表（按 `YYYY-MM-DD` 字符串比较，跨日自动覆盖）。流星雨持有者**完全无视冷却**：每次「来财」必定掉落 1–100 点（不掉 0、免疫 10% 扣减事件），每次掉落后 `METEOR_DISSIPATE_CHANCE`（22.22%）概率**星光消散**（流星雨销毁并播报）。
+- 通知**逐条直接发送**（`_send_notification`，失败仅打日志），发完 10 秒自动删除。
 
 ## 数据库与常量
 
@@ -106,7 +106,7 @@ start_roulette(bot)
 | `black_market.db` | black_market_shelf | 黑市货架（全服共享，卖光自动重置） |
 | `bank.db` | bank_accounts / bank_heist_cooldowns 等 | 银行存款与抢劫 |
 | `lottery.db` | lottery_pool | 彩票奖池（单行） |
-| `quota_drops.db` | drop_cooldowns | 掉落冷却 |
+| `quota_drops.db` | drop_cooldowns / daily_first_drops | 掉落冷却 / 每日首次「来财」记录 |
 
 以上 DB 均默认存放于 `data/` 目录（`DATA_DIR` 可整体改址），由 `paths.py` 的 `data_file()` 统一解析，解析时自动建目录。
 
