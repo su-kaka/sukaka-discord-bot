@@ -345,7 +345,7 @@ def start_roulette(bot: "SukakaBot") -> None:
             await handle_yourname(message, client)
             return
 
-        # 下线：使用下线卡，额度重置为 500，存款清空，进入下线状态
+        # 下线：使用下线卡，额度重置，存款/道具/状态清空，进入下线状态
         if content == OFFLINE_KEYWORD:
             await handle_offline(message, client)
             return

@@ -87,7 +87,7 @@ CARD_POOL: dict[str, tuple[str, str, int]] = {
     "inflation": ("通货膨胀", f"若银行存在存款 > {INFLATION_MIN_BALANCE} 点的用户，所有人存款数值减半", 5),
     "depositking": ("存为王", "排行榜前十名用户自动存款一次（额度的 50% 存入银行）", 5),
     "sellout": ("变卖家产", f"随机卖掉若干种道具的全部数量（含蛇符咒/会员卡/流星雨/收藏家/诅咒之眼/神性/D6/领主阳伞/石中剑/圣剑），每张 {GACHA_SELLOUT_PRICE} 点额度", 10),
-    "offline": ("下线", f"【特殊道具】额度超过 {OFFLINE_MIN_QUOTA} 才能使用：额度重置为 {OFFLINE_RESET_QUOTA}，银行存款清空，无法进行任何操作，下次任意发言解除下线状态", 5),
+    "offline": ("下线", f"【特殊道具】额度超过 {OFFLINE_MIN_QUOTA} 才能使用：额度重置为 {OFFLINE_RESET_QUOTA}，银行存款清空，全部道具与身上状态清空，无法进行任何操作，下次任意发言解除下线状态", 5),
     "wishingpool": ("许愿池", f"从三个栏目（唯一道具/即时生效卡/背包道具卡）中任选一张，{GACHA_WISHING_TIMEOUT_SECONDS} 秒内未选视为放弃", 5),
     "collector": ("收藏家", "抽卡得到的背包道具可叠加次数：重复抽到相同道具时次数 +1（无收藏家时重复抽到不叠加，但保留已有数量不会重置）（唯一道具，直到下一个人抽到）", 5),
     "curseeye": ("诅咒之眼", f"持有期间发送 `诅咒 @某人`（可以诅咒自己）叠加使用诅咒之眼且无视诅咒冷却：目标额度重置为 {CURSE_EYE_QUOTA_MIN}-{CURSE_EYE_QUOTA_MAX} 之间的随机值，无法被借刀杀人反弹，每次使用有 {round(CURSE_EYE_DESTROY_CHANCE*100, 2)}% 概率销毁（唯一道具，直到下一个人抽到）", 5),
@@ -721,6 +721,16 @@ def get_user_buffs(discord_id: int) -> list[str]:
     return [row[0] for row in rows]
 
 
+def clear_user_buffs(discord_id: int) -> list[str]:
+    """清空用户身上全部状态 buff（含祝福等增益），返回被清除的 buff 名称列表。"""
+    buff_keys = get_user_buffs(discord_id)
+    if not buff_keys:
+        return []
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute("DELETE FROM active_buffs WHERE discord_id = ?", (discord_id,))
+    return [BUFF_POOL.get(buff_key, (buff_key, "未知效果"))[0] for buff_key in buff_keys]
+
+
 def _stack_effect(discord_id: int, card_key: str, amount: int = 1) -> int:
     """叠加道具数量（+amount），返回叠加后的当前次数。"""
     with sqlite3.connect(DB_PATH) as conn:
@@ -817,6 +827,33 @@ def get_user_cards(discord_id: int) -> list[tuple[str, int]]:
             (discord_id,),
         ).fetchall()
     return rows
+
+
+def clear_user_items(discord_id: int) -> tuple[list[str], list[str]]:
+    """清空用户全部道具：背包道具全清 + 持有的唯一道具销毁（下线卡使用时调用）。
+
+    返回 (被清空的背包道具描述列表「名称×数量」, 被销毁的唯一道具名称列表)。"""
+    with sqlite3.connect(DB_PATH) as conn:
+        rows = conn.execute(
+            "SELECT card_key, remaining FROM gacha_effects WHERE discord_id = ? AND remaining > 0",
+            (discord_id,),
+        ).fetchall()
+        conn.execute("DELETE FROM gacha_effects WHERE discord_id = ?", (discord_id,))
+    bag_names = []
+    for card_key, remaining in rows:
+        name, _, _ = CARD_POOL.get(card_key, (card_key, "", 0))
+        bag_names.append(f"{name}×{remaining}")
+
+    unique_names = []
+    for card_key, (_, _, has_func, holder_table) in UNIQUE_HOLDER_ACCESSORS.items():
+        if not has_func(discord_id):
+            continue
+        # 唯一道具单行表：按 discord_id 删除等价于「是其持有者才销毁」（与变卖家产同款）
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.execute(f"DELETE FROM {holder_table} WHERE discord_id = ?", (discord_id,))
+        name, _, _ = CARD_POOL.get(card_key, (card_key, "", 0))
+        unique_names.append(name)
+    return bag_names, unique_names
 
 
 def steal_random_card(robber_id: int, target_id: int) -> Optional[str]:
@@ -1928,7 +1965,8 @@ async def handle_offline(
     message: discord.Message,
     client: httpx.AsyncClient,
 ) -> None:
-    """下线卡：额度超过 500 才能使用，额度重置为 500，银行存款清空，进入下线状态。"""
+    """下线卡：额度超过 OFFLINE_MIN_QUOTA 才能使用：额度重置为 OFFLINE_RESET_QUOTA，
+    银行存款清空，全部道具与身上状态 buff 清空，进入下线状态。"""
     if not consume_effect(message.author.id, "offline"):
         await message.channel.send("🔌 你没有生效中的「下线」卡。")
         return
@@ -1945,7 +1983,7 @@ async def handle_offline(
         )
         return
 
-    # 额度重置为 500：先扣全部，再发 500
+    # 额度重置：先扣全部，再发重置值
     deducted = await adjust_quota(client, "deduct", message.author.name, quota)
     if deducted is None:
         _add_effect(message.author.id, "offline", 1)
@@ -1960,15 +1998,29 @@ async def handle_offline(
     old_balance = _get_balance(message.author.id)
     _set_balance(message.author.id, 0)
 
+    # 清空全部道具（背包 + 唯一道具）与身上状态 buff
+    cleared_bag, cleared_uniques = clear_user_items(message.author.id)
+    cleared_buffs = clear_user_buffs(message.author.id)
+
     # 进入下线状态
     set_offline(message.author.id)
 
-    await message.channel.send(
-        f"🔌 {message.author.mention} 使用 **下线**！\n"
+    result_lines = [
         f"💥 额度从 **{quota} 点** 重置为 **{OFFLINE_RESET_QUOTA} 点**，"
-        f"银行存款 **{old_balance} 点** 已清空！\n"
-        f"📴 已进入下线状态：无法被任何交互选择、无法抢红包、无法通过「{QUOTA_DROP_KEYWORD}」掉落额度。\n"
-        f"💬 下次任意发言将解除下线状态。"
+        f"银行存款 **{old_balance} 点** 已清空！"
+    ]
+    if cleared_bag:
+        result_lines.append(f"🎒 背包道具已全部清空：{'、'.join(cleared_bag)}")
+    if cleared_uniques:
+        result_lines.append(f"👑 唯一道具已销毁：{'、'.join(cleared_uniques)}")
+    if cleared_buffs:
+        result_lines.append(f"🌀 身上状态已全部清除：{'、'.join(cleared_buffs)}")
+    result_lines.append(
+        f"📴 已进入下线状态：无法被任何交互选择、无法抢红包、无法通过「{QUOTA_DROP_KEYWORD}」掉落额度。"
+    )
+    result_lines.append("💬 下次任意发言将解除下线状态。")
+    await message.channel.send(
+        f"🔌 {message.author.mention} 使用 **下线**！\n" + "\n".join(result_lines)
     )
 
 
