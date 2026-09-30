@@ -14,7 +14,8 @@ from roulette.constants import BIG_RED_PACKET_OPTIONS_COUNT
 # 关闭启动全量成员分块后 guild.get_member() 经常未命中，REST 查询有频率限制，
 # 这里对解析结果做短期缓存，避免频繁打 REST。
 _MEMBER_CACHE: dict[tuple[int, str], tuple[discord.Member, float]] = {}
-_MEMBER_CACHE_TTL_SECONDS = 300.0
+_MEMBER_CACHE_TTL_SECONDS = 600.0
+_MEMBER_CACHE_MAX_ENTRIES = 1000  # 容量上限，防止只写不读的过期条目无限堆积
 
 
 def _cache_get(guild_id: int, key: str) -> Optional[discord.Member]:
@@ -28,7 +29,31 @@ def _cache_get(guild_id: int, key: str) -> Optional[discord.Member]:
     return member
 
 
+def _cache_sweep() -> None:
+    """容量控制：先清扫全部过期条目，仍超上限则按写入时间淘汰最旧的。
+
+    TTL 是惰性清理（查到才删），只写不读的过期条目会一直留着，
+    所以在写入路径上做主动容量控制，保证内存有界。
+    """
+    now = time.monotonic()
+    for k in [
+        k
+        for k, (_, cached_at) in _MEMBER_CACHE.items()
+        if now - cached_at > _MEMBER_CACHE_TTL_SECONDS
+    ]:
+        _MEMBER_CACHE.pop(k, None)
+    if len(_MEMBER_CACHE) < _MEMBER_CACHE_MAX_ENTRIES:
+        return
+    # 回落到 90% 水位，避免在临界点反复清扫
+    target = int(_MEMBER_CACHE_MAX_ENTRIES * 0.9)
+    oldest = sorted(_MEMBER_CACHE.items(), key=lambda kv: kv[1][1])
+    for k, _ in oldest[: len(_MEMBER_CACHE) - target]:
+        _MEMBER_CACHE.pop(k, None)
+
+
 def _cache_put(guild_id: int, key: str, member: discord.Member) -> None:
+    if len(_MEMBER_CACHE) >= _MEMBER_CACHE_MAX_ENTRIES:
+        _cache_sweep()
     _MEMBER_CACHE[(guild_id, key)] = (member, time.monotonic())
 
 
