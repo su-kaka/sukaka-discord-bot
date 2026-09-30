@@ -14,6 +14,7 @@ from roulette.api import adjust_quota, query_quota
 from roulette.beg import BegView
 from roulette.big_red_packet import big_red_packet_loop
 from roulette.constants import (
+    ALLIN_BASE_MULTIPLIER,
     ALLIN_COOLDOWN_SECONDS,
     ALLIN_FEE_PERCENT,
     ALLIN_KEYWORD,
@@ -47,6 +48,7 @@ from roulette.constants import (
     DUEL_TIMEOUT_SECONDS,
     GACHA_KEYWORD,
     GACHA_NOTYET_RECOVER,
+    HEAVEN_ALLIN_MULTIPLIER,
     HEAVEN_ALLIN_SUCCESS_CHANCE,
     HOLY_BLADE_ALLIN_SUCCESS_CHANCE,
     LEADERBOARD_KEYWORD,
@@ -319,7 +321,7 @@ def start_roulette(bot: "SukakaBot") -> None:
                 "🔫 **抢劫**：50% 抢到对方 10%-30% 额度，50% 被反杀扣自己 10%-30%（抢到部分随机销毁 1%-50%，实得不超过自身额度），需 ≥ 10 点。\n"
                 "💍 **结婚**：两人额度合并，扣 10% 手续费（最低 10 点），剩余平分。\n"
                 "🔮 **诅咒**：押 10 点，被诅咒者下次抢劫必被反杀、决斗必输、梭哈必输。\n"
-                "🎰 **梭哈**：押全部额度，50% 翻倍（一念天堂翻四倍），成功后扣 20% 手续费，失败清零。\n"
+                f"🎰 **梭哈**：押全部额度，50% 翻{ALLIN_BASE_MULTIPLIER}倍（一念天堂翻{HEAVEN_ALLIN_MULTIPLIER}倍），成功后扣 20% 手续费，失败清零。\n"
                 "🎴 **抽卡**：押额度的 10%（最少 10 点），40% 空白，其余获得随机魔法卡或者道具。\n"
                 "🌒 **黑市**：随机上架 5 种卡牌，价格 100-500 点随机、库存 1-5 件随机，点击购买；卖光后自动上新，不卖唯一道具；持有唯一道具「领主阳伞」时购物免费（0 点购入），但每次购买有 33% 概率破损。\n"
                 "🏦 **地精银行**：发送「存钱」押 50%（最低 10 点），发送「取钱」随机扣 1%-50% 手续费。存款超 1000 点解锁普通安保（防抢劫），超 2000 点解锁皇家安保（防抢劫/诱惑/劫富济贫）。\n"
@@ -376,11 +378,11 @@ def start_roulette(bot: "SukakaBot") -> None:
                 return
 
             stake = quota  # 全部额度作为赌注
-            # 一念天堂生效：成功概率提升到 75%，成功翻三倍（覆盖祝福，祝福不消耗）
+            # 一念天堂生效：成功概率提升到 HEAVEN_ALLIN_SUCCESS_CHANCE，成功翻 HEAVEN_ALLIN_MULTIPLIER 倍（覆盖祝福，祝福不消耗）
             heaven = consume_effect(message.author.id, "heaven")
-            # 圣剑生效：梭哈成功率常驻 75%（唯一道具，不消耗；优先级低于一念天堂）
+            # 圣剑生效：梭哈成功率常驻 HOLY_BLADE_ALLIN_SUCCESS_CHANCE（唯一道具，不消耗；优先级低于一念天堂）
             holy_blade = has_holy_blade(message.author.id)
-            # 祝福生效：成功概率提高到 75%（不与一念天堂叠加，倍率不变）
+            # 祝福生效：成功概率提高到 BLESS_ALLIN_SUCCESS_CHANCE（不与一念天堂叠加，倍率不变）
             bless = False if heaven else has_buff(message.author.id, "bless")
             if heaven:
                 success_chance = HEAVEN_ALLIN_SUCCESS_CHANCE
@@ -413,18 +415,18 @@ def start_roulette(bot: "SukakaBot") -> None:
                 success = retry_success
 
             if success:
-                multiplier = 3 if heaven else 2
+                multiplier = HEAVEN_ALLIN_MULTIPLIER if heaven else ALLIN_BASE_MULTIPLIER
                 gross_prize = stake * multiplier
                 fee = int(gross_prize * ALLIN_FEE_PERCENT / 100)
                 prize = gross_prize - fee
                 new_quota = await adjust_quota(client, "grant", message.author.name, prize)
-                heaven_note = "\n🃏 一念天堂生效！成功概率提升，翻三倍！" if heaven else ""
-                holy_note = "\n⚔️ 圣剑在手，梭哈成功率常驻 75%！" if holy_blade else ""
+                heaven_note = f"\n🃏 一念天堂生效！成功概率提升，翻{HEAVEN_ALLIN_MULTIPLIER}倍！" if heaven else ""
+                holy_note = f"\n⚔️ 圣剑在手，梭哈成功率常驻 {round(HOLY_BLADE_ALLIN_SUCCESS_CHANCE*100)}%！" if holy_blade else ""
                 bless_note = ""
                 if bless:
                     # 梭哈结算后祝福消耗（一念天堂覆盖时祝福不消耗，保留在身上）
                     remove_buff(message.author.id, "bless")
-                    bless_note = "\n✨ 祝福生效！梭哈成功率提升到 75%！"
+                    bless_note = f"\n✨ 祝福生效！梭哈成功率提升到 {round(BLESS_ALLIN_SUCCESS_CHANCE*100)}%！"
                 if new_quota is None:
                     await message.channel.send(
                         f"🎰 {message.author.mention} 梭哈 **{quota} 点** 翻倍成功！"

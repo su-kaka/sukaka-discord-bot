@@ -23,6 +23,7 @@ from roulette.bank import (
 from roulette.constants import (
     BANK_ROYAL_SECURITY_THRESHOLD,
     BLACK_MARKET_KEYWORD,
+    BLESS_ALLIN_SUCCESS_CHANCE,
     GACHA_BLANK_CHANCE,
     GACHA_COOLDOWN_SECONDS,
     GACHA_COST_PERCENT,
@@ -41,6 +42,8 @@ from roulette.constants import (
     D6_KEYWORD,
     D6_RECHARGE_COST,
     DIVINITY_EXHAUST_CHANCE,
+    HEAVEN_ALLIN_MULTIPLIER,
+    HEAVEN_ALLIN_SUCCESS_CHANCE,
     HOLY_BLADE_ALLIN_SUCCESS_CHANCE,
     INFLATION_MIN_BALANCE,
     LORD_PARASOL_BREAK_CHANCE,
@@ -61,7 +64,7 @@ DB_PATH = data_file("GACHA_DB", GACHA_DB)
 
 # 卡牌定义：key -> (名称, 描述, 权重)
 CARD_POOL: dict[str, tuple[str, str, int]] = {
-    "heaven": ("一念天堂", "下次梭哈成功概率提升到 75%，成功翻三倍", 5),
+    "heaven": ("一念天堂", f"下次梭哈成功概率提升到 {round(HEAVEN_ALLIN_SUCCESS_CHANCE*100)}%，成功翻{HEAVEN_ALLIN_MULTIPLIER}倍", 5),
     "lucky": ("幸运儿", "下次抢任意红包并列抢到最大份", 10),
     "madman": ("狂徒", "下次抢劫必定成功，抢劫 CD 缩短到 10 秒", 10),
     "weak": ("虚弱", "下次被抢劫必定被抢成功", 10),
@@ -88,7 +91,7 @@ CARD_POOL: dict[str, tuple[str, str, int]] = {
     "wishingpool": ("许愿池", f"从三个栏目（唯一道具/即时生效卡/背包道具卡）中任选一张，{GACHA_WISHING_TIMEOUT_SECONDS} 秒内未选视为放弃", 5),
     "collector": ("收藏家", "抽卡得到的背包道具可叠加次数：重复抽到相同道具时次数 +1（无收藏家时重复抽到不叠加，但保留已有数量不会重置）（唯一道具，直到下一个人抽到）", 5),
     "curseeye": ("诅咒之眼", f"持有期间发送 `诅咒 @某人`（可以诅咒自己）叠加使用诅咒之眼且无视诅咒冷却：目标额度重置为 {CURSE_EYE_QUOTA_MIN}-{CURSE_EYE_QUOTA_MAX} 之间的随机值，无法被借刀杀人反弹，每次使用有 {round(CURSE_EYE_DESTROY_CHANCE*100, 2)}% 概率销毁（唯一道具，直到下一个人抽到）", 5),
-    "divinity": ("神性", f"抽到即解除身上的诅咒，解锁 `祝福 @某人` 能力：被祝福者梭哈成功率提高到 75%（无法和一念天堂叠加，一念天堂会覆盖祝福），每次祝福有 {round(DIVINITY_EXHAUST_CHANCE*100, 2)}% 概率神力耗尽（唯一道具，直到下一个人抽到）", 5),
+    "divinity": ("神性", f"抽到即解除身上的诅咒，解锁 `祝福 @某人` 能力：被祝福者梭哈成功率提高到 {round(BLESS_ALLIN_SUCCESS_CHANCE*100)}%（无法和一念天堂叠加，一念天堂会覆盖祝福），每次祝福有 {round(DIVINITY_EXHAUST_CHANCE*100, 2)}% 概率神力耗尽（唯一道具，直到下一个人抽到）", 5),
     "d6": ("D6", f"发送「{D6_KEYWORD}」掷骰重置身上的道具与状态：数量不变、种类改变（唯一道具重置为其他唯一道具、背包道具重置为其他背包道具、状态 buff 重置为其他状态 buff），每次使用需 {D6_RECHARGE_COST} 点充能（唯一道具，直到下一个人抽到）", 5),
     "lordparasol": ("领主阳伞", f"黑市购买任意物品免费，每次购买有 {round(LORD_PARASOL_BREAK_CHANCE*100, 2)}% 概率破损（唯一道具，直到破损或下一个人抽到）", 5),
     "swordstone": ("石中剑", "无效果，静静等待着觉醒；与神性同持时融合成圣剑（唯一道具，直到下一个人抽到）", 5),
@@ -108,7 +111,7 @@ BAG_CARDS = set(CARD_POOL) - UNIQUE_CARDS - INSTANT_SETTLE_CARDS - WISHING_EXCLU
 # 状态 buff 定义（诅咒/祝福/虚弱/仇恨不进背包，存 active_buffs 表）：key -> (名称, 描述)
 BUFF_POOL: dict[str, tuple[str, str]] = {
     "curse": ("诅咒", "下次抢劫必被反杀、决斗必输、梭哈必输，生效一次后解除"),
-    "bless": ("祝福", "梭哈成功率提高到 75%（不与一念天堂叠加，一念天堂覆盖时保留）"),
+    "bless": ("祝福", f"梭哈成功率提高到 {round(BLESS_ALLIN_SUCCESS_CHANCE*100)}%（不与一念天堂叠加，一念天堂覆盖时保留）"),
     "weak": ("虚弱", "下次被抢劫必定被抢成功，生效一次后解除"),
     # 仇恨：抢银行得手后附加，下次存钱被强制没收（存钱时消耗）
     "hatred": ("仇恨", "抢银行得手后被地精银行盯上，下次存钱将被强制没收"),
@@ -1040,7 +1043,7 @@ async def handle_gacha(
             await message.channel.send(
                 f"🎴 {message.author.mention} 消耗 {cost} 点抽卡……\n"
                 f"✨ **神性**入手！但 **石中剑** 与之共鸣——\n"
-                f"⚡✨ **石中剑与神性融合成圣剑！**梭哈成功率常驻 75%，驱散并免疫一切 debuff！{transfer_note}"
+                f"⚡✨ **石中剑与神性融合成圣剑！**梭哈成功率常驻 {round(HOLY_BLADE_ALLIN_SUCCESS_CHANCE*100)}%，驱散并免疫一切 debuff！{transfer_note}"
             )
             return
         purge_note = "\n🔮 抽到神性，身上缠绕的诅咒已解除！" if remove_buff(message.author.id, "curse") else ""
@@ -1089,7 +1092,7 @@ async def handle_gacha(
             await message.channel.send(
                 f"🎴 {message.author.mention} 消耗 {cost} 点抽卡……\n"
                 f"🗡️ **石中剑**入手！但 **神性** 与之共鸣——\n"
-                f"⚡✨ **石中剑与神性融合成圣剑！**梭哈成功率常驻 75%，驱散并免疫一切 debuff！{transfer_note}"
+                f"⚡✨ **石中剑与神性融合成圣剑！**梭哈成功率常驻 {round(HOLY_BLADE_ALLIN_SUCCESS_CHANCE*100)}%，驱散并免疫一切 debuff！{transfer_note}"
             )
         else:
             await message.channel.send(
@@ -1208,7 +1211,7 @@ async def _handle_multidraw(
             set_divinity_holder(message.author.id)
             transfer_note = f"（从 <@{old_holder}> 手中转移）" if old_holder and old_holder != message.author.id else ""
             if try_fuse_holy_blade(message.author.id):
-                lines.append(f"{i+1}. ✨ **神性**入手！与 **石中剑** 共鸣，⚡✨ 融合成 **圣剑**！梭哈成功率常驻 75%，驱散并免疫一切 debuff！{transfer_note}")
+                lines.append(f"{i+1}. ✨ **神性**入手！与 **石中剑** 共鸣，⚡✨ 融合成 **圣剑**！梭哈成功率常驻 {round(HOLY_BLADE_ALLIN_SUCCESS_CHANCE*100)}%，驱散并免疫一切 debuff！{transfer_note}")
                 continue
             purge_note = "（诅咒已解除）" if remove_buff(message.author.id, "curse") else ""
             lines.append(f"{i+1}. ✨ **{name}**！{desc}{transfer_note}{purge_note}")
@@ -1233,7 +1236,7 @@ async def _handle_multidraw(
             set_sword_stone_holder(message.author.id)
             transfer_note = f"（从 <@{old_holder}> 手中转移）" if old_holder and old_holder != message.author.id else ""
             if try_fuse_holy_blade(message.author.id):
-                lines.append(f"{i+1}. 🗡️ **石中剑**入手！与 **神性** 共鸣，⚡✨ 融合成 **圣剑**！梭哈成功率常驻 75%，驱散并免疫一切 debuff！{transfer_note}")
+                lines.append(f"{i+1}. 🗡️ **石中剑**入手！与 **神性** 共鸣，⚡✨ 融合成 **圣剑**！梭哈成功率常驻 {round(HOLY_BLADE_ALLIN_SUCCESS_CHANCE*100)}%，驱散并免疫一切 debuff！{transfer_note}")
             else:
                 lines.append(f"{i+1}. 🗡️ **{name}**！{desc}{transfer_note}")
             continue
@@ -2048,7 +2051,7 @@ async def handle_d6(message: discord.Message, client: httpx.AsyncClient) -> None
 
     # 兜底融合检查：多个唯一道具重置后可能恰好掷出石中剑+神性的组合
     if try_fuse_holy_blade(message.author.id):
-        unique_lines.append("⚡✨ **石中剑与神性共鸣，融合成圣剑！**梭哈成功率常驻 75%，驱散并免疫一切 debuff！")
+        unique_lines.append(f"⚡✨ **石中剑与神性共鸣，融合成圣剑！**梭哈成功率常驻 {round(HOLY_BLADE_ALLIN_SUCCESS_CHANCE*100)}%，驱散并免疫一切 debuff！")
 
     # 重置背包道具：先删除全部记录，再按原数量重新掷骰（撞车自动合并）
     bag_lines: list[str] = []
@@ -2207,7 +2210,7 @@ class WishPoolView(discord.ui.View):
                 await interaction.response.edit_message(
                     content=(
                         f"🌠 <@{self.user_id}> 从许愿池选中了 **{name}**！与之相伴的道具共鸣——\n"
-                        f"⚡✨ **石中剑与神性融合成圣剑！**梭哈成功率常驻 75%，驱散并免疫一切 debuff！{transfer_note}"
+                        f"⚡✨ **石中剑与神性融合成圣剑！**梭哈成功率常驻 {round(HOLY_BLADE_ALLIN_SUCCESS_CHANCE*100)}%，驱散并免疫一切 debuff！{transfer_note}"
                     ),
                     view=self,
                 )

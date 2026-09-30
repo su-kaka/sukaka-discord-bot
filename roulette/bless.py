@@ -1,4 +1,4 @@
-"""祝福：神性（唯一道具）持有者专属能力——被祝福者梭哈成功率提高到 75%。"""
+"""祝福：神性（唯一道具）持有者专属能力——被祝福者梭哈成功率提高到 BLESS_ALLIN_SUCCESS_CHANCE。"""
 
 from __future__ import annotations
 
@@ -6,19 +6,19 @@ import random
 
 import discord
 
-from roulette.constants import DIVINITY_EXHAUST_CHANCE
+from roulette.constants import BLESS_ALLIN_SUCCESS_CHANCE, DIVINITY_EXHAUST_CHANCE
 from roulette.gacha import add_buff, clear_divinity_holder, has_buff, has_divinity, is_offline
 
 
 async def handle_bless(message: discord.Message) -> None:
     """处理「祝福 @某人」命令：神性持有者专属。
 
-    被祝福者梭哈成功率提高到 75%（不与一念天堂叠加，一念天堂覆盖时祝福不消耗），
+    被祝福者梭哈成功率提高到 BLESS_ALLIN_SUCCESS_CHANCE（不与一念天堂叠加，一念天堂覆盖时祝福不消耗），
     每次祝福有 DIVINITY_EXHAUST_CHANCE 概率神力耗尽（神性销毁）。"""
     if not message.mentions:
         await message.channel.send(
             f"✨ 用法：`祝福 @某人`（需持有唯一道具 **神性**），"
-            f"被祝福者梭哈成功率提高到 75%（不与一念天堂叠加），"
+            f"被祝福者梭哈成功率提高到 {round(BLESS_ALLIN_SUCCESS_CHANCE * 100)}%（不与一念天堂叠加），"
             f"每次祝福有 {round(DIVINITY_EXHAUST_CHANCE * 100, 2)}% 概率神力耗尽。"
         )
         return
@@ -48,5 +48,5 @@ async def handle_bless(message: discord.Message) -> None:
 
     await message.channel.send(
         f"✨ {message.author.mention} 祝福了 {target.mention}！\n"
-        f"🌟 {target.mention} 的梭哈成功率提高到 **75%**（不与一念天堂叠加）。{exhaust_note}"
+        f"🌟 {target.mention} 的梭哈成功率提高到 **{round(BLESS_ALLIN_SUCCESS_CHANCE * 100)}%**（不与一念天堂叠加）。{exhaust_note}"
     )
