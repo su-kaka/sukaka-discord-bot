@@ -40,6 +40,7 @@ from roulette.gacha import (
     _settle_weak,
     has_collector,
     has_effect,
+    has_lord_parasol,
 )
 
 DB_PATH = data_file("BLACK_MARKET_DB", BLACK_MARKET_DB)
@@ -266,28 +267,32 @@ class BlackMarketView(discord.ui.View):
                 return
             price, remaining = purchase
 
-            # 扣额度：查询失败/额度不足则回补库存
-            quota = await query_quota(self.client, user.name)
-            if quota is None:
-                _return_stock(card_key)
-                await interaction.response.send_message(
-                    "🌒 查询额度失败，请稍后再试。", ephemeral=True
-                )
-                return
-            if quota < price:
-                _return_stock(card_key)
-                await interaction.response.send_message(
-                    f"🌒 额度不足：当前 {quota} 点，**{name}** 需要 {price} 点。",
-                    ephemeral=True,
-                )
-                return
-            deducted = await adjust_quota(self.client, "deduct", user.name, price)
-            if deducted is None:
-                _return_stock(card_key)
-                await interaction.response.send_message(
-                    "🌒 扣除额度失败，请稍后再试。", ephemeral=True
-                )
-                return
+            # 领主阳伞：持有者黑市购物免费（0 点购入），跳过查额与扣额
+            if has_lord_parasol(user.id):
+                price = 0
+            else:
+                # 扣额度：查询失败/额度不足则回补库存
+                quota = await query_quota(self.client, user.name)
+                if quota is None:
+                    _return_stock(card_key)
+                    await interaction.response.send_message(
+                        "🌒 查询额度失败，请稍后再试。", ephemeral=True
+                    )
+                    return
+                if quota < price:
+                    _return_stock(card_key)
+                    await interaction.response.send_message(
+                        f"🌒 额度不足：当前 {quota} 点，**{name}** 需要 {price} 点。",
+                        ephemeral=True,
+                    )
+                    return
+                deducted = await adjust_quota(self.client, "deduct", user.name, price)
+                if deducted is None:
+                    _return_stock(card_key)
+                    await interaction.response.send_message(
+                        "🌒 扣除额度失败，请稍后再试。", ephemeral=True
+                    )
+                    return
 
             # 发货：即时生效卡立即静默结算并播报实际生效结果，背包道具卡入包（与抽卡同款收藏家叠加规则）
             note = ""
@@ -310,8 +315,9 @@ class BlackMarketView(discord.ui.View):
                 else:
                     note = "\n🎒 已放入背包，可用 `我的卡牌` 查看。"
 
+            price_note = "免费（⛱️领主阳伞）" if price == 0 else f"-{price} 点"
             result_text = (
-                f"🌒 {user.mention} 买下 **{name}**（-{price} 点，剩 {remaining} 件）"
+                f"🌒 {user.mention} 买下 **{name}**（{price_note}，剩 {remaining} 件）"
                 f"{note}"
             )
 

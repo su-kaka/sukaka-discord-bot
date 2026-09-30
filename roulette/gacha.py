@@ -22,6 +22,7 @@ from roulette.bank import (
 )
 from roulette.constants import (
     BANK_ROYAL_SECURITY_THRESHOLD,
+    BLACK_MARKET_KEYWORD,
     GACHA_BLANK_CHANCE,
     GACHA_COOLDOWN_SECONDS,
     GACHA_COST_PERCENT,
@@ -80,13 +81,14 @@ CARD_POOL: dict[str, tuple[str, str, int]] = {
     "yourname": ("你的名字", "【超稀有道具】使用 `你的名字@某人` 和某人交换身体：双方交换所有额度/卡牌/银行存款，5 分钟后换回，期间双方不能再被你的名字影响", 1),
     "inflation": ("通货膨胀", f"若银行存在存款 > {INFLATION_MIN_BALANCE} 点的用户，所有人存款数值减半", 5),
     "depositking": ("存为王", "排行榜前十名用户自动存款一次（额度的 50% 存入银行）", 5),
-    "sellout": ("变卖家产", f"随机卖掉若干种道具的全部数量（含蛇符咒/会员卡/流星雨/收藏家/诅咒之眼/神性/D6），每张 {GACHA_SELLOUT_PRICE} 点额度", 10),
-    "offline": ("下线", f"【特殊道具】额度超过 {OFFLINE_MIN_QUOTA} 才能使用：额度重置为 {OFFLINE_RESET_QUOTA}，银行存款清空，无法被任何操作选择、无法抢红包、无法通过「{QUOTA_DROP_KEYWORD}」掉落额度，下次任意发言解除下线状态", 5),
+    "sellout": ("变卖家产", f"随机卖掉若干种道具的全部数量（含蛇符咒/会员卡/流星雨/收藏家/诅咒之眼/神性/D6/领主阳伞），每张 {GACHA_SELLOUT_PRICE} 点额度", 10),
+    "offline": ("下线", f"【特殊道具】额度超过 {OFFLINE_MIN_QUOTA} 才能使用：额度重置为 {OFFLINE_RESET_QUOTA}，银行存款清空，无法进行任何操作，下次任意发言解除下线状态", 5),
     "wishingpool": ("许愿池", f"从三个栏目（唯一道具/即时生效卡/背包道具卡）中任选一张，{GACHA_WISHING_TIMEOUT_SECONDS} 秒内未选视为放弃", 5),
     "collector": ("收藏家", "抽卡得到的背包道具可叠加次数：重复抽到相同道具时次数 +1（无收藏家时重复抽到不叠加，但保留已有数量不会重置）（唯一道具，直到下一个人抽到）", 5),
     "curseeye": ("诅咒之眼", f"持有期间发送 `诅咒 @某人`（可以诅咒自己）叠加使用诅咒之眼且无视诅咒冷却：目标额度重置为 {CURSE_EYE_QUOTA_MIN}-{CURSE_EYE_QUOTA_MAX} 之间的随机值，无法被借刀杀人反弹，每次使用有 {round(CURSE_EYE_DESTROY_CHANCE*100, 2)}% 概率销毁（唯一道具，直到下一个人抽到）", 5),
     "divinity": ("神性", f"抽到即解除身上的诅咒，解锁 `祝福 @某人` 能力：被祝福者梭哈成功率提高到 75%（无法和一念天堂叠加，一念天堂会覆盖祝福），每次祝福有 {round(DIVINITY_EXHAUST_CHANCE*100, 2)}% 概率神力耗尽（唯一道具，直到下一个人抽到）", 5),
     "d6": ("D6", f"发送「{D6_KEYWORD}」掷骰重置身上的道具与状态：数量不变、种类改变（唯一道具重置为其他唯一道具、背包道具重置为其他背包道具、状态 buff 重置为其他状态 buff），每次使用需 {D6_RECHARGE_COST} 点充能（唯一道具，直到下一个人抽到）", 5),
+    "lordparasol": ("领主阳伞", f"黑市购买任意物品免费，效果永久（唯一道具，直到下一个人抽到）", 5),
     "blank": ("空白", "无效果", 40),  # 实际概率由 GACHA_BLANK_CHANCE 控制
 }
 
@@ -95,7 +97,7 @@ WISHING_EXCLUDED_CARDS = {"blank", "wishingpool"}
 # 抽中即结算的卡牌（选择后立即触发，不进背包）；虚弱抽中即附加为状态 buff
 INSTANT_SETTLE_CARDS = {"robinhood", "selfdestruct", "error", "inflation", "depositking", "sellout", "weak"}
 # 唯一道具卡牌（选择后立即替换持有者，不进背包）
-UNIQUE_CARDS = {"snake", "membership", "meteor", "collector", "curseeye", "divinity", "d6"}
+UNIQUE_CARDS = {"snake", "membership", "meteor", "collector", "curseeye", "divinity", "d6", "lordparasol"}
 # 背包道具卡牌集合（D6 重置背包道具时的候选范围：卡池去掉唯一道具/即时结算卡/空白与许愿池）
 BAG_CARDS = set(CARD_POOL) - UNIQUE_CARDS - INSTANT_SETTLE_CARDS - WISHING_EXCLUDED_CARDS
 
@@ -180,6 +182,15 @@ def _init_db() -> None:
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS d6_holder (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                discord_id INTEGER NOT NULL,
+                created_at REAL NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS lord_parasol_holder (
                 id INTEGER PRIMARY KEY CHECK (id = 1),
                 discord_id INTEGER NOT NULL,
                 created_at REAL NOT NULL
@@ -493,6 +504,35 @@ def has_d6(discord_id: int) -> bool:
     return get_d6_holder() == discord_id
 
 
+def set_lord_parasol_holder(discord_id: int) -> None:
+    """设置领主阳伞唯一持有者（覆盖旧持有者）。"""
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute(
+            """
+            INSERT INTO lord_parasol_holder (id, discord_id, created_at)
+            VALUES (1, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                discord_id = excluded.discord_id,
+                created_at = excluded.created_at
+            """,
+            (discord_id, time.time()),
+        )
+
+
+def get_lord_parasol_holder() -> Optional[int]:
+    """查询当前领主阳伞持有者，无持有者返回 None。"""
+    with sqlite3.connect(DB_PATH) as conn:
+        row = conn.execute(
+            "SELECT discord_id FROM lord_parasol_holder WHERE id = 1"
+        ).fetchone()
+    return row[0] if row else None
+
+
+def has_lord_parasol(discord_id: int) -> bool:
+    """是否持有领主阳伞（唯一道具）。"""
+    return get_lord_parasol_holder() == discord_id
+
+
 # 唯一道具持有者存取映射：card_key -> (setter, getter, has, 表名)
 UNIQUE_HOLDER_ACCESSORS = {
     "snake": (set_snake_charm_holder, get_snake_charm_holder, has_snake_charm, "snake_charm_holder"),
@@ -502,6 +542,7 @@ UNIQUE_HOLDER_ACCESSORS = {
     "curseeye": (set_curse_eye_holder, get_curse_eye_holder, has_curse_eye, "curse_eye_holder"),
     "divinity": (set_divinity_holder, get_divinity_holder, has_divinity, "divinity_holder"),
     "d6": (set_d6_holder, get_d6_holder, has_d6, "d6_holder"),
+    "lordparasol": (set_lord_parasol_holder, get_lord_parasol_holder, has_lord_parasol, "lord_parasol_holder"),
 }
 
 
@@ -664,6 +705,8 @@ def steal_random_card(robber_id: int, target_id: int) -> Optional[str]:
         candidates.append("divinity")
     if has_d6(target_id):
         candidates.append("d6")
+    if has_lord_parasol(target_id):
+        candidates.append("lordparasol")
     if not candidates:
         return None
     card_key = random.choice(candidates)
@@ -681,6 +724,8 @@ def steal_random_card(robber_id: int, target_id: int) -> Optional[str]:
         set_divinity_holder(robber_id)
     elif card_key == "d6":
         set_d6_holder(robber_id)
+    elif card_key == "lordparasol":
+        set_lord_parasol_holder(robber_id)
     else:
         # 偷来的道具叠加到自己的背包（+1），不重置已有数量
         consume_effect(target_id, card_key)
@@ -874,6 +919,20 @@ async def handle_gacha(
         )
         return
 
+    # 领主阳伞：唯一道具，立即替换持有者
+    if card_key == "lordparasol":
+        old_holder = get_lord_parasol_holder()
+        set_lord_parasol_holder(message.author.id)
+        transfer_note = ""
+        if old_holder and old_holder != message.author.id:
+            transfer_note = f"\n⛱️ 领主阳伞已从 <@{old_holder}> 手中转移！"
+        await message.channel.send(
+            f"🎴 {message.author.mention} 消耗 {cost} 点抽卡……\n"
+            f"⛱️ **{name}**！{desc}。{transfer_note}\n"
+            f"🌒 现在发送「{BLACK_MARKET_KEYWORD}」购物全部免费，尽情扫货！"
+        )
+        return
+
     # 错误：立即结算，额度重置为随机值
     if card_key == "error":
         await _settle_error(message, client)
@@ -992,6 +1051,13 @@ async def _handle_multidraw(
             set_d6_holder(message.author.id)
             transfer_note = f"（从 <@{old_holder}> 手中转移）" if old_holder and old_holder != message.author.id else ""
             lines.append(f"{i+1}. 🎲 **{name}**！{desc}{transfer_note}")
+            continue
+
+        if card_key == "lordparasol":
+            old_holder = get_lord_parasol_holder()
+            set_lord_parasol_holder(message.author.id)
+            transfer_note = f"（从 <@{old_holder}> 手中转移）" if old_holder and old_holder != message.author.id else ""
+            lines.append(f"{i+1}. ⛱️ **{name}**！{desc}{transfer_note}")
             continue
 
         if card_key == "error":
@@ -1286,6 +1352,8 @@ async def _settle_sellout(
         items.append(("divinity", 1, True))
     if has_d6(message.author.id):
         items.append(("d6", 1, True))
+    if has_lord_parasol(message.author.id):
+        items.append(("lordparasol", 1, True))
 
     if not items:
         await message.channel.send("🏷️ 你身上没有任何道具卡牌，变卖家产无效果。")
@@ -1308,6 +1376,7 @@ async def _settle_sellout(
                 "curseeye": "curse_eye_holder",
                 "divinity": "divinity_holder",
                 "d6": "d6_holder",
+                "lordparasol": "lord_parasol_holder",
             }[card_key]
             with sqlite3.connect(DB_PATH) as conn:
                 conn.execute(
