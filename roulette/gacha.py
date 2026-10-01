@@ -103,7 +103,7 @@ CARD_POOL: dict[str, tuple[str, str, int]] = {
     "lordparasol": ("领主阳伞", f"黑市购买任意物品免费，每次购买有 {round(LORD_PARASOL_BREAK_CHANCE*100, 2)}% 概率破损（唯一道具，直到破损或下一个人抽到）", 5),
     "swordstone": ("石中剑", "无效果，静静等待着觉醒；与神性同持时融合成圣剑（唯一道具，直到下一个人抽到）", 5),
     "holyblade": ("圣剑", f"石中剑与神性融合而成：梭哈成功率常驻 {round(HOLY_BLADE_ALLIN_SUCCESS_CHANCE*100)}%，驱散并免疫一切 debuff（诅咒/虚弱/仇恨）（唯一道具，不能被抽卡/许愿池抽出，只能由融合或 D6 掷出，直到下一个人抢走/变卖/D6 重置）", 0),  # 权重 0：圣剑不可被抽卡抽出
-    "cicada": ("春秋蝉", f"解锁「{CICADA_MARK_KEYWORD}」「{CICADA_RECALL_KEYWORD}」与「{CICADA_REWIND_KEYWORD}」：标记当前的额度/存款/背包物品/身上状态/唯一道具为存档点（再次标记覆盖旧档），「{CICADA_RECALL_KEYWORD}」查看存档点；「{CICADA_REWIND_KEYWORD}」{round((1-CICADA_REWIND_FAIL_CHANCE)*100)}% 成功回到存档点，失败迷失在光阴长河；持有「你的名字」时受羁绊牵引，必定成功（唯一道具，直到下一个人抽到）", 1),
+    "cicada": ("春秋蝉", f"解锁「{CICADA_MARK_KEYWORD}」「{CICADA_RECALL_KEYWORD}」与「{CICADA_REWIND_KEYWORD}」：标记当前的额度/存款/背包物品/身上状态/唯一道具为存档点（再次标记覆盖旧档），「{CICADA_RECALL_KEYWORD}」查看存档点；「{CICADA_REWIND_KEYWORD}」{round((1-CICADA_REWIND_FAIL_CHANCE)*100)}% 成功回到存档点，失败迷失在光阴长河；失去春秋蝉时存档点一并湮灭（唯一道具，直到下一个人抽到）", 1),
     "blank": ("空白", "无效果", 40),  # 实际概率由 GACHA_BLANK_CHANCE 控制
 }
 
@@ -667,8 +667,15 @@ def has_holy_blade(discord_id: int) -> bool:
 
 
 def set_cicada_holder(discord_id: int) -> None:
-    """设置春秋蝉唯一持有者（覆盖旧持有者）。"""
+    """设置春秋蝉唯一持有者（覆盖旧持有者）。
+
+    存档点绑定春秋蝉：原持有者失去春秋蝉时，其存档点一并湮灭（蝉与蝉鸣的记忆不可分离）。"""
     with sqlite3.connect(DB_PATH) as conn:
+        # 先读旧持有者再更新（同事务内）
+        row = conn.execute(
+            "SELECT discord_id FROM cicada_holder WHERE id = 1"
+        ).fetchone()
+        old_holder = row[0] if row else None
         conn.execute(
             """
             INSERT INTO cicada_holder (id, discord_id, created_at)
@@ -679,6 +686,12 @@ def set_cicada_holder(discord_id: int) -> None:
             """,
             (discord_id, time.time()),
         )
+        # 旧持有者易主：其存档点湮灭
+        if old_holder is not None and old_holder != discord_id:
+            conn.execute(
+                "DELETE FROM cicada_snapshots WHERE discord_id = ?",
+                (old_holder,),
+            )
 
 
 def get_cicada_holder() -> Optional[int]:
@@ -722,7 +735,8 @@ def _clear_user_unique_cards(discord_id: int, keep_cicada: bool = True) -> list[
     """销毁用户当前持有的全部唯一道具（单行表按 discord_id 删除）。
 
     keep_cicada=True 时春秋蝉不受影响（回溯者仍持有春秋蝉）；
-    keep_cicada=False 时连春秋蝉一并销毁（迷失分支用）。返回被销毁的道具名称列表。"""
+    keep_cicada=False 时连春秋蝉一并销毁（迷失分支用），且存档点随蝉一并湮灭。
+    返回被销毁的道具名称列表。"""
     cleared = []
     for card_key, (_, _, has_func, holder_table) in UNIQUE_HOLDER_ACCESSORS.items():
         if keep_cicada and card_key == "cicada":
@@ -732,6 +746,12 @@ def _clear_user_unique_cards(discord_id: int, keep_cicada: bool = True) -> list[
         # 唯一道具单行表：按 discord_id 删除等价于「是其持有者才销毁」（与变卖家产同款）
         with sqlite3.connect(DB_PATH) as conn:
             conn.execute(f"DELETE FROM {holder_table} WHERE discord_id = ?", (discord_id,))
+            # 存档点绑定春秋蝉：蝉被销毁时存档点一并湮灭
+            if card_key == "cicada":
+                conn.execute(
+                    "DELETE FROM cicada_snapshots WHERE discord_id = ?",
+                    (discord_id,),
+                )
         name, _, _ = CARD_POOL.get(card_key, (card_key, "", 0))
         cleared.append(name)
     return cleared
@@ -1887,6 +1907,12 @@ async def _settle_sellout(
                     f"DELETE FROM {unique_holder_table} WHERE discord_id = ?",
                     (message.author.id,),
                 )
+                # 存档点绑定春秋蝉：蝉被变卖时存档点一并湮灭
+                if card_key == "cicada":
+                    conn.execute(
+                        "DELETE FROM cicada_snapshots WHERE discord_id = ?",
+                        (message.author.id,),
+                    )
         else:
             for _ in range(sold_count):
                 consume_effect(message.author.id, card_key)
@@ -2354,6 +2380,12 @@ async def handle_d6(message: discord.Message, client: httpx.AsyncClient) -> None
         old_table = UNIQUE_HOLDER_ACCESSORS[old_key][3]
         with sqlite3.connect(DB_PATH) as conn:
             conn.execute(f"DELETE FROM {old_table} WHERE discord_id = ?", (message.author.id,))
+            # 存档点绑定春秋蝉：蝉被重置换走时存档点一并湮灭
+            if old_key == "cicada":
+                conn.execute(
+                    "DELETE FROM cicada_snapshots WHERE discord_id = ?",
+                    (message.author.id,),
+                )
         UNIQUE_HOLDER_ACCESSORS[new_key][0](message.author.id)
         # 重置成神性时解除身上的诅咒（与抽到神性行为一致）
         if new_key == "divinity":
@@ -2476,15 +2508,10 @@ async def handle_cicada_mark(message: discord.Message, client: httpx.AsyncClient
         lines.append(f"👑 唯一道具已记入存档：{unique_desc}")
     else:
         lines.append("👑 没有唯一道具，也已一并记入存档。")
-    if has_effect(message.author.id, "yourname"):
-        lines.append(
-            f"⏳ 发送「{CICADA_REWIND_KEYWORD}」可回到此刻——💫 受「你的名字」羁绊牵引，必定成功！"
-        )
-    else:
-        lines.append(
-            f"⏳ 发送「{CICADA_REWIND_KEYWORD}」可回到此刻——"
-            f"{round(CICADA_REWIND_FAIL_CHANCE*100)}% 概率迷失在光阴长河！"
-        )
+    lines.append(
+        f"⏳ 发送「{CICADA_REWIND_KEYWORD}」可回到此刻——"
+        f"{round(CICADA_REWIND_FAIL_CHANCE*100)}% 概率迷失在光阴长河！"
+    )
     await message.channel.send("\n".join(lines))
 
 
@@ -2529,15 +2556,10 @@ async def handle_cicada_recall(message: discord.Message) -> None:
         lines.append(f"👑 唯一道具：{unique_desc}")
     else:
         lines.append("👑 唯一道具：无。")
-    if has_effect(message.author.id, "yourname"):
-        lines.append(
-            f"⏳ 发送「{CICADA_REWIND_KEYWORD}」可回到该存档点——💫 受「你的名字」羁绊牵引，必定成功！"
-        )
-    else:
-        lines.append(
-            f"⏳ 发送「{CICADA_REWIND_KEYWORD}」可回到该存档点——"
-            f"{round(CICADA_REWIND_FAIL_CHANCE*100)}% 概率迷失在光阴长河！"
-        )
+    lines.append(
+        f"⏳ 发送「{CICADA_REWIND_KEYWORD}」可回到该存档点——"
+        f"{round(CICADA_REWIND_FAIL_CHANCE*100)}% 概率迷失在光阴长河！"
+    )
     await message.channel.send("\n".join(lines))
 
 
@@ -2546,7 +2568,6 @@ async def handle_cicada_rewind(message: discord.Message, client: httpx.AsyncClie
 
     成功：当前额度/存款/背包物品/身上状态/唯一道具被存档点覆盖（存档点保留可反复回溯），春秋蝉跟着一起回去；
     失败：失去当前所有额度/存款/背包物品/身上状态/唯一道具（含春秋蝉自身），存档点一并湮灭。
-    羁绊牵引：持有「你的名字」时必定成功。
     """
     if not has_cicada(message.author.id):
         await message.channel.send(f"🦋 你没有「春秋蝉」，无法使用「{CICADA_REWIND_KEYWORD}」。")
@@ -2570,13 +2591,8 @@ async def handle_cicada_rewind(message: discord.Message, client: httpx.AsyncClie
 
     await message.channel.send(f"🦋 {message.author.mention} 发动 **{CICADA_REWIND_KEYWORD}**！蝉翼震颤，光阴开始倒流……")
 
-    # 羁绊牵引：持有「你的名字」时必定成功，不掷骰
-    bonded = has_effect(message.author.id, "yourname")
-    if bonded:
-        await message.channel.send(f"💫 「你的名字」的羁绊牵引着春秋蝉，光阴长河无法吞没你！")
-
     # 50% 迷失在光阴长河：失去所有额度/存款/背包物品/身上状态/唯一道具，存档点湮灭
-    if not bonded and random.random() < CICADA_REWIND_FAIL_CHANCE:
+    if random.random() < CICADA_REWIND_FAIL_CHANCE:
         if cur_quota > 0:
             deducted = await adjust_quota(client, "deduct", message.author.name, cur_quota)
             if deducted is None:
