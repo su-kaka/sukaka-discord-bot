@@ -101,7 +101,7 @@ CARD_POOL: dict[str, tuple[str, str, int]] = {
     "lordparasol": ("领主阳伞", f"黑市购买任意物品免费，每次购买有 {round(LORD_PARASOL_BREAK_CHANCE*100, 2)}% 概率破损（唯一道具，直到破损或下一个人抽到）", 5),
     "swordstone": ("石中剑", "无效果，静静等待着觉醒；与神性同持时融合成圣剑（唯一道具，直到下一个人抽到）", 5),
     "holyblade": ("圣剑", f"石中剑与神性融合而成：梭哈成功率常驻 {round(HOLY_BLADE_ALLIN_SUCCESS_CHANCE*100)}%，驱散并免疫一切 debuff（诅咒/虚弱/仇恨）（唯一道具，不能被抽卡/许愿池抽出，只能由融合或 D6 掷出，直到下一个人抢走/变卖/D6 重置）", 0),  # 权重 0：圣剑不可被抽卡抽出
-    "cicada": ("春秋蝉", f"解锁「{CICADA_MARK_KEYWORD}」「{CICADA_RECALL_KEYWORD}」与「{CICADA_REWIND_KEYWORD}」：标记当前的额度/存款/背包物品/身上状态/唯一道具为存档点（再次标记覆盖旧档），「{CICADA_RECALL_KEYWORD}」查看存档点；「{CICADA_REWIND_KEYWORD}」{round((1-CICADA_REWIND_FAIL_CHANCE)*100)}% 成功回到存档点，失败迷失在光阴长河；持有「你的名字」时受羁绊牵引，必定成功（唯一道具，直到下一个人抽到）", 3),
+    "cicada": ("春秋蝉", f"解锁「{CICADA_MARK_KEYWORD}」「{CICADA_RECALL_KEYWORD}」与「{CICADA_REWIND_KEYWORD}」：标记当前的额度/存款/背包物品/身上状态/唯一道具为存档点（再次标记覆盖旧档），「{CICADA_RECALL_KEYWORD}」查看存档点；「{CICADA_REWIND_KEYWORD}」{round((1-CICADA_REWIND_FAIL_CHANCE)*100)}% 成功回到存档点，失败迷失在光阴长河；持有「你的名字」时受羁绊牵引，必定成功（唯一道具，直到下一个人抽到）", 2),
     "blank": ("空白", "无效果", 40),  # 实际概率由 GACHA_BLANK_CHANCE 控制
 }
 
