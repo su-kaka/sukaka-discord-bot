@@ -40,6 +40,7 @@ from roulette.constants import (
     BLESS_KEYWORD,
     BLESS_ALLIN_SUCCESS_CHANCE,
     CICADA_MARK_KEYWORD,
+    CICADA_RECALL_KEYWORD,
     CICADA_REWIND_KEYWORD,
     CURSE_KEYWORD,
     D6_KEYWORD,
@@ -86,6 +87,7 @@ from roulette.gacha import (
     clear_offline,
     consume_effect,
     handle_cicada_mark,
+    handle_cicada_recall,
     handle_cicada_rewind,
     handle_d6,
     handle_gacha,
@@ -284,12 +286,17 @@ def start_roulette(bot: "SukakaBot") -> None:
             await handle_d6(message, client)
             return
 
-        # 春秋蝉：标记时间，把当前额度/存款/背包物品存为存档点
+        # 春秋蝉：标记时间，把当前额度/存款/背包物品/身上状态/唯一道具存为存档点
         if content == CICADA_MARK_KEYWORD:
             await handle_cicada_mark(message, client)
             return
 
-        # 春秋蝉：回溯时间，67% 回到存档点，33% 迷失在光阴长河
+        # 春秋蝉：回忆时间，查看存档点记录的状态（只读）
+        if content == CICADA_RECALL_KEYWORD:
+            await handle_cicada_recall(message)
+            return
+
+        # 春秋蝉：回溯时间，50% 回到存档点，50% 迷失在光阴长河
         if content == CICADA_REWIND_KEYWORD:
             await handle_cicada_rewind(message, client)
             return
