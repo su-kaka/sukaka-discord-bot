@@ -259,18 +259,6 @@ def _init_db() -> None:
             )
             """
         )
-        # 旧库迁移：cicada_snapshots 补 buffs / uniques 列（默认空列表）
-        columns = {
-            row[1] for row in conn.execute("PRAGMA table_info(cicada_snapshots)").fetchall()
-        }
-        if "buffs" not in columns:
-            conn.execute(
-                "ALTER TABLE cicada_snapshots ADD COLUMN buffs TEXT NOT NULL DEFAULT '[]'"
-            )
-        if "uniques" not in columns:
-            conn.execute(
-                "ALTER TABLE cicada_snapshots ADD COLUMN uniques TEXT NOT NULL DEFAULT '[]'"
-            )
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS active_buffs (
@@ -282,14 +270,6 @@ def _init_db() -> None:
             )
             """
         )
-        # 旧库迁移：active_buffs 补 stack 列（默认 1 层，福星层数累积用）
-        active_buff_columns = {
-            row[1] for row in conn.execute("PRAGMA table_info(active_buffs)").fetchall()
-        }
-        if "stack" not in active_buff_columns:
-            conn.execute(
-                "ALTER TABLE active_buffs ADD COLUMN stack INTEGER NOT NULL DEFAULT 1"
-            )
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS body_swaps (
