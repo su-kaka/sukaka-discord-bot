@@ -51,6 +51,7 @@ from roulette.constants import (
     HEAVEN_ALLIN_SUCCESS_CHANCE,
     HOLY_BLADE_ALLIN_SUCCESS_CHANCE,
     INFLATION_MIN_BALANCE,
+    LUCKY_STAR_ALLIN_BONUS_PER_STACK,
     LORD_PARASOL_BREAK_CHANCE,
     MARRY_FEE_PERCENT,
     MARRY_MIN_FEE,
@@ -88,6 +89,7 @@ CARD_POOL: dict[str, tuple[str, str, int]] = {
     "forlove": ("因为爱情", "下次结婚时获得对方所有额度", 10),
     "taxevasion": ("偷税漏税", "下次取钱手续费为 0", 10),
     "notyet": ("时候未到", "梭哈归零时自动恢复 50 点", 10),
+    "luckystar": ("福星", f"附加福星 buff：每次梭哈失败，梭哈成功率 +{round(LUCKY_STAR_ALLIN_BONUS_PER_STACK*100)}%（可与一念天堂/圣剑/祝福叠加，可累积）；梭哈成功后福星消散", 10),
     "yourname": ("你的名字", "【超稀有道具】使用 `你的名字@某人` 和某人交换身体：双方交换所有额度/卡牌/银行存款，5 分钟后换回，期间双方不能再被你的名字影响", 1),
     "inflation": ("通货膨胀", f"若银行存在存款 > {INFLATION_MIN_BALANCE} 点的用户，所有人存款数值减半", 5),
     "depositking": ("存为王", "排行榜前十名用户自动存款一次（额度的 50% 存入银行）", 5),
@@ -107,20 +109,24 @@ CARD_POOL: dict[str, tuple[str, str, int]] = {
 
 # 许愿池可选范围：空白与许愿池本身不可选，圣剑只能由融合或 D6 掷出
 WISHING_EXCLUDED_CARDS = {"blank", "wishingpool", "holyblade"}
-# 抽中即结算的卡牌（选择后立即触发，不进背包）；虚弱抽中即附加为状态 buff
-INSTANT_SETTLE_CARDS = {"robinhood", "selfdestruct", "error", "inflation", "depositking", "sellout", "weak"}
+# 抽中即结算的卡牌（选择后立即触发，不进背包）；虚弱/福星抽中即附加为状态 buff
+INSTANT_SETTLE_CARDS = {"robinhood", "selfdestruct", "error", "inflation", "depositking", "sellout", "weak", "luckystar"}
 # 唯一道具卡牌（选择后立即替换持有者，不进背包）；圣剑权重 0 不会被抽中，但 D6 重置候选包含它
 UNIQUE_CARDS = {"snake", "membership", "meteor", "collector", "curseeye", "divinity", "d6", "lordparasol", "swordstone", "holyblade", "cicada"}
 # 背包道具卡牌集合（D6 重置背包道具时的候选范围：卡池去掉唯一道具/即时结算卡/空白与许愿池）
 BAG_CARDS = set(CARD_POOL) - UNIQUE_CARDS - INSTANT_SETTLE_CARDS - WISHING_EXCLUDED_CARDS
 
-# 状态 buff 定义（诅咒/祝福/虚弱/仇恨不进背包，存 active_buffs 表）：key -> (名称, 描述)
+# 福星 buff key（同名即时结算卡抽中即附加此 buff，层数存 active_buffs.stack）
+LUCKY_STAR_BUFF_KEY = "luckystar"
+
+# 状态 buff 定义（诅咒/祝福/虚弱/仇恨/福星不进背包，存 active_buffs 表）：key -> (名称, 描述)
 BUFF_POOL: dict[str, tuple[str, str]] = {
     "curse": ("诅咒", "下次抢劫必被反杀、决斗必输、梭哈必输，生效一次后解除"),
     "bless": ("祝福", f"梭哈成功率提高到 {round(BLESS_ALLIN_SUCCESS_CHANCE*100)}%（不与一念天堂叠加，一念天堂覆盖时保留）"),
     "weak": ("虚弱", "下次被抢劫必定被抢成功，生效一次后解除"),
     # 仇恨：抢银行得手后附加，下次存钱被强制没收（存钱时消耗）
     "hatred": ("仇恨", "抢银行得手后被地精银行盯上，下次存钱将被强制没收"),
+    "luckystar": ("福星", f"每次梭哈失败：梭哈成功率 +{round(LUCKY_STAR_ALLIN_BONUS_PER_STACK*100)}%（可与一念天堂/圣剑/祝福叠加，可累积），梭哈成功后消散"),
 }
 
 # debuff 类 buff（持有圣剑时免疫）：诅咒/虚弱/仇恨；祝福为增益不受影响
@@ -270,11 +276,20 @@ def _init_db() -> None:
             CREATE TABLE IF NOT EXISTS active_buffs (
                 discord_id INTEGER NOT NULL,
                 buff_key TEXT NOT NULL,
+                stack INTEGER NOT NULL DEFAULT 1,
                 created_at REAL NOT NULL,
                 PRIMARY KEY (discord_id, buff_key)
             )
             """
         )
+        # 旧库迁移：active_buffs 补 stack 列（默认 1 层，福星层数累积用）
+        active_buff_columns = {
+            row[1] for row in conn.execute("PRAGMA table_info(active_buffs)").fetchall()
+        }
+        if "stack" not in active_buff_columns:
+            conn.execute(
+                "ALTER TABLE active_buffs ADD COLUMN stack INTEGER NOT NULL DEFAULT 1"
+            )
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS body_swaps (
@@ -747,10 +762,10 @@ def _save_cicada_snapshot(
     quota: int,
     bank_balance: int,
     bag_items: list[tuple[str, int]],
-    buff_keys: list[str],
+    buff_items: list[tuple[str, int]],
     unique_keys: list[str],
 ) -> None:
-    """写入春秋蝉存档点（覆盖旧存档）：额度 + 银行存款 + 背包物品 + 身上状态 buff + 唯一道具。"""
+    """写入春秋蝉存档点（覆盖旧存档）：额度 + 银行存款 + 背包物品 + 身上状态 buff（含层数） + 唯一道具。"""
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute(
             """
@@ -769,7 +784,7 @@ def _save_cicada_snapshot(
                 quota,
                 bank_balance,
                 json.dumps(bag_items, ensure_ascii=False),
-                json.dumps(buff_keys, ensure_ascii=False),
+                json.dumps(buff_items, ensure_ascii=False),
                 json.dumps(unique_keys, ensure_ascii=False),
                 time.time(),
             ),
@@ -778,10 +793,10 @@ def _save_cicada_snapshot(
 
 def _load_cicada_snapshot(
     discord_id: int,
-) -> Optional[tuple[int, int, list[tuple[str, int]], list[str], list[str], float]]:
+) -> Optional[tuple[int, int, list[tuple[str, int]], list[tuple[str, int]], list[str], float]]:
     """读取春秋蝉存档点，无存档返回 None。
 
-    返回 (额度, 存款, 背包物品列表, 身上状态 buff key 列表, 唯一道具 key 列表, 标记时间)。"""
+    返回 (额度, 存款, 背包物品列表, 身上状态 buff (key, 层数) 列表, 唯一道具 key 列表, 标记时间)。"""
     with sqlite3.connect(DB_PATH) as conn:
         row = conn.execute(
             """
@@ -793,16 +808,27 @@ def _load_cicada_snapshot(
     if row is None:
         return None
     bag_items = [(item[0], int(item[1])) for item in json.loads(row[2])]
-    buff_keys = [str(key) for key in json.loads(row[3])]
+    # 兼容旧存档：buffs 字段为纯 key 字符串列表（无层数，默认 1 层）
+    raw_buffs = json.loads(row[3])
+    if raw_buffs and isinstance(raw_buffs[0], str):
+        buff_items = [(str(key), 1) for key in raw_buffs]
+    else:
+        buff_items = [(str(item[0]), int(item[1])) for item in raw_buffs]
     unique_keys = [str(key) for key in json.loads(row[4])]
-    return row[0], row[1], bag_items, buff_keys, unique_keys, row[5]
+    return row[0], row[1], bag_items, buff_items, unique_keys, row[5]
 
 
 def add_buff_guarded(discord_id: int, buff_key: str) -> bool:
-    """圣剑守护的 add_buff：持有圣剑时 debuff 无法附加（返回 False），其余正常附加。"""
+    """圣剑守护的 add_buff：持有圣剑时 debuff 无法附加（返回 False），其余正常附加。
+
+    福星初次上身为 0 层（加成随梭哈失败累积），其余 buff 默认 1 层。"""
     if buff_key in DEBUFF_BUFFS and has_holy_blade(discord_id):
         return False
-    add_buff(discord_id, buff_key)
+    add_buff(
+        discord_id,
+        buff_key,
+        0 if buff_key == LUCKY_STAR_BUFF_KEY else 1,
+    )
     return True
 
 
@@ -845,17 +871,19 @@ UNIQUE_HOLDER_ACCESSORS = {
 }
 
 
-def add_buff(discord_id: int, buff_key: str) -> None:
-    """添加状态 buff（诅咒/祝福），已存在则刷新时间。"""
+def add_buff(discord_id: int, buff_key: str, stack: int = 1) -> None:
+    """添加状态 buff（诅咒/祝福/虚弱/福星），已存在则刷新时间（层数保留不重置）。
+
+    福星可传 stack=0（0 层起步，层数随梭哈失败累积）。"""
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute(
             """
-            INSERT INTO active_buffs (discord_id, buff_key, created_at)
-            VALUES (?, ?, ?)
+            INSERT INTO active_buffs (discord_id, buff_key, stack, created_at)
+            VALUES (?, ?, ?, ?)
             ON CONFLICT(discord_id, buff_key) DO UPDATE SET
                 created_at = excluded.created_at
             """,
-            (discord_id, buff_key, time.time()),
+            (discord_id, buff_key, max(0, stack), time.time()),
         )
 
 
@@ -869,6 +897,16 @@ def has_buff(discord_id: int, buff_key: str) -> bool:
     return row is not None
 
 
+def get_buff_stack(discord_id: int, buff_key: str) -> int:
+    """查询状态 buff 的当前层数，无该 buff 返回 0。"""
+    with sqlite3.connect(DB_PATH) as conn:
+        row = conn.execute(
+            "SELECT stack FROM active_buffs WHERE discord_id = ? AND buff_key = ?",
+            (discord_id, buff_key),
+        ).fetchone()
+    return int(row[0]) if row else 0
+
+
 def remove_buff(discord_id: int, buff_key: str) -> bool:
     """移除状态 buff，返回是否原本存在。"""
     with sqlite3.connect(DB_PATH) as conn:
@@ -879,6 +917,35 @@ def remove_buff(discord_id: int, buff_key: str) -> bool:
         return cursor.rowcount > 0
 
 
+def get_lucky_star_stack(discord_id: int) -> int:
+    """查询福星当前层数（0 表示没有福星 buff）。"""
+    return get_buff_stack(discord_id, LUCKY_STAR_BUFF_KEY)
+
+
+def bump_lucky_star(discord_id: int) -> int:
+    """梭哈失败后福星层数 +1（无福星 buff 时不创建），返回加成后的层数。"""
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.execute(
+            """
+            UPDATE active_buffs SET stack = stack + 1
+            WHERE discord_id = ? AND buff_key = ?
+            """,
+            (discord_id, LUCKY_STAR_BUFF_KEY),
+        )
+        if cursor.rowcount > 0:
+            row = conn.execute(
+                "SELECT stack FROM active_buffs WHERE discord_id = ? AND buff_key = ?",
+                (discord_id, LUCKY_STAR_BUFF_KEY),
+            ).fetchone()
+            return int(row[0])
+    return 0
+
+
+def clear_lucky_star(discord_id: int) -> bool:
+    """梭哈成功后移除福星 buff，返回是否原本存在。"""
+    return remove_buff(discord_id, LUCKY_STAR_BUFF_KEY)
+
+
 def get_user_buffs(discord_id: int) -> list[str]:
     """查询用户身上所有状态 buff key。"""
     with sqlite3.connect(DB_PATH) as conn:
@@ -887,6 +954,16 @@ def get_user_buffs(discord_id: int) -> list[str]:
             (discord_id,),
         ).fetchall()
     return [row[0] for row in rows]
+
+
+def get_user_buffs_with_stacks(discord_id: int) -> list[tuple[str, int]]:
+    """查询用户身上所有状态 buff (key, 层数) 列表（春秋蝉存档点用）。"""
+    with sqlite3.connect(DB_PATH) as conn:
+        rows = conn.execute(
+            "SELECT buff_key, stack FROM active_buffs WHERE discord_id = ?",
+            (discord_id,),
+        ).fetchall()
+    return [(row[0], int(row[1])) for row in rows]
 
 
 def clear_user_buffs(discord_id: int) -> list[str]:
@@ -1126,7 +1203,12 @@ async def handle_my_cards(message: discord.Message) -> None:
         lines.append("🌀 身上状态：")
         for buff_key in buffs:
             buff_name, buff_desc = BUFF_POOL.get(buff_key, (buff_key, "未知效果"))
-            lines.append(f"• **{buff_name}** — {buff_desc}")
+            # 福星展示当前层数（梭哈失败累积，成功后消散）
+            if buff_key == LUCKY_STAR_BUFF_KEY:
+                stack = get_buff_stack(message.author.id, buff_key)
+                lines.append(f"• **{buff_name}** ×{stack} — {buff_desc}")
+            else:
+                lines.append(f"• **{buff_name}** — {buff_desc}")
     await message.channel.send("\n".join(lines))
 
 
@@ -1377,6 +1459,11 @@ async def handle_gacha(
         await _settle_weak(message)
         return
 
+    # 福星：立即附加为状态 buff，不进背包
+    if card_key == "luckystar":
+        await _settle_luckystar(message)
+        return
+
     # 背包道具：持有收藏家时叠加次数，否则保留已有数量不重置
     remaining, stacked = _add_effect_on_draw(message.author.id, card_key)
     if stacked:
@@ -1396,19 +1483,14 @@ async def _handle_multidraw(
     client: httpx.AsyncClient,
     cost: int,
 ) -> None:
-    """十连抽：一次抽十张卡，逐张结算（自爆/许愿池卡不进十连池子）。"""
+    """十连抽：一次抽十张卡，逐张结算（即时生效卡/许愿池卡不进十连池子，避免逐张播报刷屏）。"""
     lines = [f"🎴 {message.author.mention} 发动 **十连抽**！消耗 {cost} 点抽十次："]
     for i in range(10):
-        card_key = _draw_card(exclude={"selfdestruct", "wishingpool"})
+        card_key = _draw_card(exclude=INSTANT_SETTLE_CARDS | {"wishingpool"})
         name, desc, _ = CARD_POOL[card_key]
 
         if card_key == "blank":
             lines.append(f"{i+1}. 💨 空白")
-            continue
-
-        if card_key == "robinhood":
-            lines.append(f"{i+1}. ✨ **{name}**！立即结算……")
-            await _settle_robinhood(message, client)
             continue
 
         if card_key == "snake":
@@ -1488,33 +1570,6 @@ async def _handle_multidraw(
             lines.append(f"{i+1}. 🦋 **{name}**！{desc}{transfer_note}")
             continue
 
-        if card_key == "error":
-            lines.append(f"{i+1}. 💥 **{name}**！立即结算……")
-            await _settle_error(message, client)
-            continue
-
-        if card_key == "inflation":
-            lines.append(f"{i+1}. 💸 **{name}**！立即结算……")
-            await _settle_inflation(message)
-            continue
-
-        if card_key == "depositking":
-            lines.append(f"{i+1}. 🏦 **{name}**！立即结算……")
-            await _settle_depositking(message, client)
-            continue
-
-        if card_key == "sellout":
-            lines.append(f"{i+1}. 🏷️ **{name}**！立即结算……")
-            await _settle_sellout(message, client)
-            continue
-
-        if card_key == "weak":
-            if add_buff_guarded(message.author.id, "weak"):
-                lines.append(f"{i+1}. 🤒 **{name}**！{desc}（已附加为身上状态）")
-            else:
-                lines.append(f"{i+1}. 🤒 **{name}**！⚔️ 圣剑在身，虚弱无法缠身！")
-            continue
-
         remaining, stacked = _add_effect_on_draw(message.author.id, card_key)
         if stacked:
             stack_note = f"（收藏家生效，叠加至 ×{remaining}）"
@@ -1568,6 +1623,33 @@ async def _settle_weak(message: discord.Message, announce: bool = True) -> Optio
         return effect_text
     await message.channel.send(
         f"🤒 {message.author.mention} 抽中 **{name}**！{desc}\n{effect_text}"
+    )
+    return None
+
+
+async def _settle_luckystar(message: discord.Message, announce: bool = True) -> Optional[str]:
+    """福星：立即附加福星状态 buff（0 层起步，每次梭哈失败 +10% 成功率，成功后消散），不进背包。
+
+    已有福星时刷新时间（层数保留不重置）。
+    announce=False 时不播报，返回效果文本（黑市购买时由调用方播报）。"""
+    name, desc, _ = CARD_POOL[LUCKY_STAR_BUFF_KEY]
+    had_buff = has_buff(message.author.id, LUCKY_STAR_BUFF_KEY)
+    existing_stack = get_buff_stack(message.author.id, LUCKY_STAR_BUFF_KEY)
+    add_buff(message.author.id, LUCKY_STAR_BUFF_KEY, stack=0)
+    if had_buff:
+        effect_text = (
+            f"🌟 福星已在身（当前 {existing_stack} 层），层数保留不重置。"
+        )
+    else:
+        effect_text = (
+            f"🌀 **{name}** 已附加为身上状态（不可被偷取/变卖/交换），用 `我的卡牌` 查看："
+            f"每次梭哈失败，梭哈成功率 +{round(LUCKY_STAR_ALLIN_BONUS_PER_STACK*100)}%"
+            f"（可与一念天堂/圣剑/祝福叠加，可累积），梭哈成功后消散。"
+        )
+    if not announce:
+        return effect_text
+    await message.channel.send(
+        f"🌟 {message.author.mention} 抽中 **{name}**！{desc}\n{effect_text}"
     )
     return None
 
@@ -2383,11 +2465,11 @@ async def handle_cicada_mark(message: discord.Message, client: httpx.AsyncClient
         return
     bank_balance = _get_balance(message.author.id)
     bag_items = get_user_cards(message.author.id)
-    buff_keys = get_user_buffs(message.author.id)
+    buff_items = get_user_buffs_with_stacks(message.author.id)
     unique_keys = _get_user_unique_cards(message.author.id)
 
     _save_cicada_snapshot(
-        message.author.id, quota, bank_balance, bag_items, buff_keys, unique_keys
+        message.author.id, quota, bank_balance, bag_items, buff_items, unique_keys
     )
 
     lines = [f"🦋 {message.author.mention} 发动 **{CICADA_MARK_KEYWORD}**！蝉鸣声定格了此刻："]
@@ -2399,9 +2481,10 @@ async def handle_cicada_mark(message: discord.Message, client: httpx.AsyncClient
         lines.append(f"🎒 背包物品已记入存档：{bag_desc}")
     else:
         lines.append("🎒 背包空空如也，也已一并记入存档。")
-    if buff_keys:
+    if buff_items:
         buff_desc = "、".join(
-            BUFF_POOL.get(key, (key, "未知效果"))[0] for key in buff_keys
+            f"{BUFF_POOL.get(key, (key, '未知效果'))[0]}×{stack}"
+            for key, stack in buff_items
         )
         lines.append(f"🌀 身上状态已记入存档：{buff_desc}")
     else:
@@ -2453,7 +2536,8 @@ async def handle_cicada_recall(message: discord.Message) -> None:
         lines.append("🎒 背包：空空如也。")
     if snap_buffs:
         buff_desc = "、".join(
-            BUFF_POOL.get(key, (key, "未知效果"))[0] for key in snap_buffs
+            f"{BUFF_POOL.get(key, (key, '未知效果'))[0]}×{stack}"
+            for key, stack in snap_buffs
         )
         lines.append(f"🌀 身上状态：{buff_desc}")
     else:
@@ -2567,8 +2651,8 @@ async def handle_cicada_rewind(message: discord.Message, client: httpx.AsyncClie
     _set_balance(message.author.id, snap_balance)
     for card_key, remaining in snap_bag:
         _add_effect(message.author.id, card_key, remaining)
-    for buff_key in snap_buffs:
-        add_buff(message.author.id, buff_key)
+    for buff_key, buff_stack in snap_buffs:
+        add_buff(message.author.id, buff_key, buff_stack)
     restored_uniques = _restore_unique_cards(message.author.id, snap_uniques)
 
     mark_age = int(time.time() - snap_at)
@@ -2586,7 +2670,8 @@ async def handle_cicada_rewind(message: discord.Message, client: httpx.AsyncClie
         lines.append("🎒 存档点的背包空空如也，现在也一样。")
     if snap_buffs:
         buff_desc = "、".join(
-            BUFF_POOL.get(key, (key, "未知效果"))[0] for key in snap_buffs
+            f"{BUFF_POOL.get(key, (key, '未知效果'))[0]}×{stack}"
+            for key, stack in snap_buffs
         )
         lines.append(f"🌀 身上状态已恢复：{buff_desc}")
     if lost_uniques:
@@ -2692,6 +2777,8 @@ class WishPoolView(discord.ui.View):
                 await _settle_sellout(self.message_obj, self.client)
             elif card_key == "weak":
                 await _settle_weak(self.message_obj)
+            elif card_key == "luckystar":
+                await _settle_luckystar(self.message_obj)
         # 唯一道具：立即替换持有者
         elif card_key in UNIQUE_CARDS:
             setter, getter = UNIQUE_HOLDER_ACCESSORS[card_key][:2]

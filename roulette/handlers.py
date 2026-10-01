@@ -55,6 +55,7 @@ from roulette.constants import (
     HEAVEN_ALLIN_SUCCESS_CHANCE,
     HOLY_BLADE_ALLIN_SUCCESS_CHANCE,
     LEADERBOARD_KEYWORD,
+    LUCKY_STAR_ALLIN_BONUS_PER_STACK,
     LOTTERY_KEYWORD,
     MARRY_COOLDOWN_SECONDS,
     MY_CARDS_KEYWORD,
@@ -84,8 +85,12 @@ from roulette.curse import handle_curse
 from roulette.dice_game import DiceGame
 from roulette.duel import DuelView
 from roulette.gacha import (
+    LUCKY_STAR_BUFF_KEY,
     clear_offline,
+    clear_lucky_star,
     consume_effect,
+    get_lucky_star_stack,
+    bump_lucky_star,
     handle_cicada_mark,
     handle_cicada_recall,
     handle_cicada_rewind,
@@ -405,6 +410,9 @@ def start_roulette(bot: "SukakaBot") -> None:
             holy_blade = has_holy_blade(message.author.id)
             # 祝福生效：成功概率提高到 BLESS_ALLIN_SUCCESS_CHANCE（不与一念天堂叠加，倍率不变）
             bless = False if heaven else has_buff(message.author.id, "bless")
+            # 福星生效：梭哈失败每层 +LUCKY_STAR_ALLIN_BONUS_PER_STACK 成功率，可与一念天堂/圣剑/祝福叠加；成功后消散
+            lucky_star_active = has_buff(message.author.id, LUCKY_STAR_BUFF_KEY)
+            lucky_stack = get_lucky_star_stack(message.author.id)
             if heaven:
                 success_chance = HEAVEN_ALLIN_SUCCESS_CHANCE
             elif holy_blade:
@@ -413,6 +421,12 @@ def start_roulette(bot: "SukakaBot") -> None:
                 success_chance = BLESS_ALLIN_SUCCESS_CHANCE
             else:
                 success_chance = 0.5
+            lucky_star_note = ""
+            if lucky_stack > 0:
+                success_chance = min(1.0, success_chance + lucky_stack * LUCKY_STAR_ALLIN_BONUS_PER_STACK)
+                lucky_star_note = (
+                    f"\n🌟 福星高照（{lucky_stack} 层）：梭哈成功率 +{round(lucky_stack * LUCKY_STAR_ALLIN_BONUS_PER_STACK * 100)}%!"
+                )
 
             # 这把不算！：失败后可重来一次
             has_retry = consume_effect(message.author.id, "retry")
@@ -448,6 +462,11 @@ def start_roulette(bot: "SukakaBot") -> None:
                     # 梭哈结算后祝福消耗（一念天堂覆盖时祝福不消耗，保留在身上）
                     remove_buff(message.author.id, "bless")
                     bless_note = f"\n✨ 祝福生效！梭哈成功率提升到 {round(BLESS_ALLIN_SUCCESS_CHANCE*100)}%！"
+                # 梭哈成功：福星消散
+                if lucky_star_active and clear_lucky_star(message.author.id):
+                    lucky_star_note = (
+                        f"\n🌟 福星已用尽好运，梭哈成功后消散（曾带来 +{round(lucky_stack * LUCKY_STAR_ALLIN_BONUS_PER_STACK * 100)}% 成功率）!"
+                    )
                 if new_quota is None:
                     await message.channel.send(
                         f"🎰 {message.author.mention} 梭哈 **{quota} 点** 翻倍成功！"
@@ -456,7 +475,7 @@ def start_roulette(bot: "SukakaBot") -> None:
                     return
                 await message.channel.send(
                     f"🎰🎉 {message.author.mention} 梭哈 **{quota} 点**\n"
-                    f"🃏 翻倍成功！毛奖金 **{gross_prize} 点**，手续费 {fee} 点（{ALLIN_FEE_PERCENT}%）销毁，实得 **{prize} 点**，当前额度 {new_quota} 点！{heaven_note}{holy_note}{bless_note}{retry_note}"
+                    f"🃏 翻倍成功！毛奖金 **{gross_prize} 点**，手续费 {fee} 点（{ALLIN_FEE_PERCENT}%）销毁，实得 **{prize} 点**，当前额度 {new_quota} 点！{heaven_note}{holy_note}{bless_note}{lucky_star_note}{retry_note}"
                 )
             else:
                 # 时候未到！：归零时自动恢复 50 点
@@ -465,6 +484,14 @@ def start_roulette(bot: "SukakaBot") -> None:
                     # 失败结算后祝福同样消耗（成功率判定已用过，与一念天堂行为一致）
                     remove_buff(message.author.id, "bless")
                     bless_note = "\n✨ 祝福生效了，但这次连神明也没有眷顾你……"
+                # 梭哈失败：福星层数 +1（下次梭哈成功率提升）
+                if lucky_star_active:
+                    new_stack = bump_lucky_star(message.author.id)
+                    lucky_star_note = (
+                        f"\n🌟 福星仍在照耀：层数 +1（当前 {new_stack} 层），下次梭哈成功率 +{round(new_stack * LUCKY_STAR_ALLIN_BONUS_PER_STACK * 100)}%!"
+                    )
+                else:
+                    lucky_star_note = ""
                 notyet = consume_effect(message.author.id, "notyet")
                 if notyet:
                     recovered = await adjust_quota(client, "grant", message.author.name, GACHA_NOTYET_RECOVER)
@@ -474,7 +501,7 @@ def start_roulette(bot: "SukakaBot") -> None:
                 # 清零：全部销毁
                 await message.channel.send(
                     f"🎰💥 {message.author.mention} 梭哈 **{quota} 点**\n"
-                    f"🃏 运气不佳，全部清零！当前额度 0 点。{curse_note}{bless_note}{retry_note}{notyet_note}"
+                    f"🃏 运气不佳，全部清零！当前额度 0 点。{curse_note}{bless_note}{lucky_star_note}{retry_note}{notyet_note}"
                 )
             return
 

@@ -82,6 +82,7 @@ DIVINITY_EXHAUST_CHANCE = 0.5  # 神性：每次祝福后 50% 概率神力耗尽
 BLESS_ALLIN_SUCCESS_CHANCE = 0.75  # 祝福：梭哈成功率提升目标
 HEAVEN_ALLIN_SUCCESS_CHANCE = 0.75  # 一念天堂：梭哈成功率提升目标
 HOLY_BLADE_ALLIN_SUCCESS_CHANCE = 0.75  # 圣剑：梭哈成功率常驻提升目标
+LUCKY_STAR_ALLIN_BONUS_PER_STACK = 0.1  # 福星：每层梭哈成功率加成（每次梭哈失败 +1 层，成功后消散）
 GACHA_WISHING_TIMEOUT_SECONDS = 60  # 许愿池选择时限（秒），超时视为放弃
 GACHA_NOTYET_RECOVER = 50  # 时候未到！恢复额度
 METEOR_DISSIPATE_CHANCE = 0.2222  # 流星雨：每次掉落后星光消散的概率

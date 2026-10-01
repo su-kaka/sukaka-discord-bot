@@ -30,16 +30,19 @@ from roulette.gacha import (
     BAG_CARDS,
     CARD_POOL,
     INSTANT_SETTLE_CARDS,
+    LUCKY_STAR_BUFF_KEY,
     UNIQUE_CARDS,
     _add_effect_on_draw,
     _settle_depositking,
     _settle_error,
     _settle_inflation,
+    _settle_luckystar,
     _settle_robinhood,
     _settle_selfdestruct,
     _settle_sellout,
     _settle_weak,
     clear_lord_parasol_holder,
+    has_buff,
     has_collector,
     has_effect,
     has_lord_parasol,
@@ -82,6 +85,7 @@ _INSTANT_SETTLERS: dict[str, Settler] = {
     "depositking": lambda m, c, a: _settle_depositking(m, c, announce=a),
     "sellout": lambda m, c, a: _settle_sellout(m, c, announce=a),
     "weak": lambda m, c, a: _settle_weak(m, announce=a),
+    "luckystar": lambda m, c, a: _settle_luckystar(m, announce=a),
 }
 
 
@@ -252,6 +256,14 @@ class BlackMarketView(discord.ui.View):
             ):
                 await interaction.response.send_message(
                     f"🌒 你已持有 **{name}**，需持有「收藏家」才能叠加数量，先别浪费额度了。",
+                    ephemeral=True,
+                )
+                return
+
+            # 福星：已有福星 buff 时购买只会刷新时间（层数保留不重置），拦截避免浪费
+            if card_key == LUCKY_STAR_BUFF_KEY and has_buff(user.id, LUCKY_STAR_BUFF_KEY):
+                await interaction.response.send_message(
+                    "🌒 福星已在你身上（层数保留不重置），先别浪费额度了。",
                     ephemeral=True,
                 )
                 return
