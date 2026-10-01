@@ -96,6 +96,10 @@ OFFLINE_KEYWORD = "下线"
 OFFLINE_MIN_QUOTA = 2000  # 使用下线卡牌的最低额度要求
 OFFLINE_RESET_QUOTA = 1000  # 下线后额度重置值
 
+CICADA_MARK_KEYWORD = "标记时间"  # 春秋蝉：标记存档点
+CICADA_REWIND_KEYWORD = "回溯时间"  # 春秋蝉：回溯到存档点
+CICADA_REWIND_FAIL_CHANCE = 0.5  # 春秋蝉：回溯失败概率（迷失在光阴长河）；持有「你的名字」时受羁绊牵引，必定成功
+
 BLACK_MARKET_KEYWORD = "黑市"
 BLACK_MARKET_DB = "black_market.db"
 BLACK_MARKET_SLOTS = 5  # 黑市货架商品种数

@@ -39,6 +39,8 @@ from roulette.constants import (
     BANKER_RUN_KEYWORD,
     BLESS_KEYWORD,
     BLESS_ALLIN_SUCCESS_CHANCE,
+    CICADA_MARK_KEYWORD,
+    CICADA_REWIND_KEYWORD,
     CURSE_KEYWORD,
     D6_KEYWORD,
     DUEL_COOLDOWN_SECONDS,
@@ -83,6 +85,8 @@ from roulette.duel import DuelView
 from roulette.gacha import (
     clear_offline,
     consume_effect,
+    handle_cicada_mark,
+    handle_cicada_rewind,
     handle_d6,
     handle_gacha,
     handle_my_cards,
@@ -278,6 +282,16 @@ def start_roulette(bot: "SukakaBot") -> None:
         # D6：持有者掷骰重置身上的道具（数量不变、种类改变）
         if content == D6_KEYWORD:
             await handle_d6(message, client)
+            return
+
+        # 春秋蝉：标记时间，把当前额度/存款/背包物品存为存档点
+        if content == CICADA_MARK_KEYWORD:
+            await handle_cicada_mark(message, client)
+            return
+
+        # 春秋蝉：回溯时间，67% 回到存档点，33% 迷失在光阴长河
+        if content == CICADA_REWIND_KEYWORD:
+            await handle_cicada_rewind(message, client)
             return
 
         # 存钱：将 50% 额度存入地精银行

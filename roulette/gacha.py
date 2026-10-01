@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import random
 import sqlite3
 import time
@@ -23,6 +24,9 @@ from roulette.bank import (
 from roulette.constants import (
     BANK_ROYAL_SECURITY_THRESHOLD,
     BLACK_MARKET_KEYWORD,
+    CICADA_MARK_KEYWORD,
+    CICADA_REWIND_FAIL_CHANCE,
+    CICADA_REWIND_KEYWORD,
     BLESS_ALLIN_SUCCESS_CHANCE,
     GACHA_BLANK_CHANCE,
     GACHA_COOLDOWN_SECONDS,
@@ -86,7 +90,7 @@ CARD_POOL: dict[str, tuple[str, str, int]] = {
     "yourname": ("你的名字", "【超稀有道具】使用 `你的名字@某人` 和某人交换身体：双方交换所有额度/卡牌/银行存款，5 分钟后换回，期间双方不能再被你的名字影响", 1),
     "inflation": ("通货膨胀", f"若银行存在存款 > {INFLATION_MIN_BALANCE} 点的用户，所有人存款数值减半", 5),
     "depositking": ("存为王", "排行榜前十名用户自动存款一次（额度的 50% 存入银行）", 5),
-    "sellout": ("变卖家产", f"随机卖掉若干种道具的全部数量（含蛇符咒/会员卡/流星雨/收藏家/诅咒之眼/神性/D6/领主阳伞/石中剑/圣剑），每张 {GACHA_SELLOUT_PRICE} 点额度", 10),
+    "sellout": ("变卖家产", f"随机卖掉若干种道具的全部数量（含唯一道具），每张 {GACHA_SELLOUT_PRICE} 点额度", 10),
     "offline": ("下线", f"【特殊道具】额度超过 {OFFLINE_MIN_QUOTA} 才能使用：额度重置为 {OFFLINE_RESET_QUOTA}，银行存款清空，全部道具与身上状态清空，无法进行任何操作，下次任意发言解除下线状态", 5),
     "wishingpool": ("许愿池", f"从三个栏目（唯一道具/即时生效卡/背包道具卡）中任选一张，{GACHA_WISHING_TIMEOUT_SECONDS} 秒内未选视为放弃", 5),
     "collector": ("收藏家", "抽卡得到的背包道具可叠加次数：重复抽到相同道具时次数 +1（无收藏家时重复抽到不叠加，但保留已有数量不会重置）（唯一道具，直到下一个人抽到）", 5),
@@ -96,6 +100,7 @@ CARD_POOL: dict[str, tuple[str, str, int]] = {
     "lordparasol": ("领主阳伞", f"黑市购买任意物品免费，每次购买有 {round(LORD_PARASOL_BREAK_CHANCE*100, 2)}% 概率破损（唯一道具，直到破损或下一个人抽到）", 5),
     "swordstone": ("石中剑", "无效果，静静等待着觉醒；与神性同持时融合成圣剑（唯一道具，直到下一个人抽到）", 5),
     "holyblade": ("圣剑", f"石中剑与神性融合而成：梭哈成功率常驻 {round(HOLY_BLADE_ALLIN_SUCCESS_CHANCE*100)}%，驱散并免疫一切 debuff（诅咒/虚弱/仇恨）（唯一道具，不能被抽卡/许愿池抽出，只能由融合或 D6 掷出，直到下一个人抢走/变卖/D6 重置）", 0),  # 权重 0：圣剑不可被抽卡抽出
+    "cicada": ("春秋蝉", f"解锁「{CICADA_MARK_KEYWORD}」与「{CICADA_REWIND_KEYWORD}」：回溯时间 {round((1-CICADA_REWIND_FAIL_CHANCE)*100)}% 成功回到存档点，失败迷失在光阴长河；持有「你的名字」时受羁绊牵引，必定成功（唯一道具，直到下一个人抽到）", 3),
     "blank": ("空白", "无效果", 40),  # 实际概率由 GACHA_BLANK_CHANCE 控制
 }
 
@@ -104,7 +109,7 @@ WISHING_EXCLUDED_CARDS = {"blank", "wishingpool", "holyblade"}
 # 抽中即结算的卡牌（选择后立即触发，不进背包）；虚弱抽中即附加为状态 buff
 INSTANT_SETTLE_CARDS = {"robinhood", "selfdestruct", "error", "inflation", "depositking", "sellout", "weak"}
 # 唯一道具卡牌（选择后立即替换持有者，不进背包）；圣剑权重 0 不会被抽中，但 D6 重置候选包含它
-UNIQUE_CARDS = {"snake", "membership", "meteor", "collector", "curseeye", "divinity", "d6", "lordparasol", "swordstone", "holyblade"}
+UNIQUE_CARDS = {"snake", "membership", "meteor", "collector", "curseeye", "divinity", "d6", "lordparasol", "swordstone", "holyblade", "cicada"}
 # 背包道具卡牌集合（D6 重置背包道具时的候选范围：卡池去掉唯一道具/即时结算卡/空白与许愿池）
 BAG_CARDS = set(CARD_POOL) - UNIQUE_CARDS - INSTANT_SETTLE_CARDS - WISHING_EXCLUDED_CARDS
 
@@ -221,6 +226,26 @@ def _init_db() -> None:
             CREATE TABLE IF NOT EXISTS holy_blade_holder (
                 id INTEGER PRIMARY KEY CHECK (id = 1),
                 discord_id INTEGER NOT NULL,
+                created_at REAL NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS cicada_holder (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                discord_id INTEGER NOT NULL,
+                created_at REAL NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS cicada_snapshots (
+                discord_id INTEGER PRIMARY KEY,
+                quota INTEGER NOT NULL,
+                bank_balance INTEGER NOT NULL,
+                bag_items TEXT NOT NULL,
                 created_at REAL NOT NULL
             )
             """
@@ -631,6 +656,74 @@ def has_holy_blade(discord_id: int) -> bool:
     return get_holy_blade_holder() == discord_id
 
 
+def set_cicada_holder(discord_id: int) -> None:
+    """设置春秋蝉唯一持有者（覆盖旧持有者）。"""
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute(
+            """
+            INSERT INTO cicada_holder (id, discord_id, created_at)
+            VALUES (1, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                discord_id = excluded.discord_id,
+                created_at = excluded.created_at
+            """,
+            (discord_id, time.time()),
+        )
+
+
+def get_cicada_holder() -> Optional[int]:
+    """查询当前春秋蝉持有者，无持有者返回 None。"""
+    with sqlite3.connect(DB_PATH) as conn:
+        row = conn.execute(
+            "SELECT discord_id FROM cicada_holder WHERE id = 1"
+        ).fetchone()
+    return row[0] if row else None
+
+
+def has_cicada(discord_id: int) -> bool:
+    """是否持有春秋蝉（唯一道具）。"""
+    return get_cicada_holder() == discord_id
+
+
+def _save_cicada_snapshot(discord_id: int, quota: int, bank_balance: int, bag_items: list[tuple[str, int]]) -> None:
+    """写入春秋蝉存档点（覆盖旧存档）：额度 + 银行存款 + 背包物品。"""
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute(
+            """
+            INSERT INTO cicada_snapshots (discord_id, quota, bank_balance, bag_items, created_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(discord_id) DO UPDATE SET
+                quota = excluded.quota,
+                bank_balance = excluded.bank_balance,
+                bag_items = excluded.bag_items,
+                created_at = excluded.created_at
+            """,
+            (
+                discord_id,
+                quota,
+                bank_balance,
+                json.dumps(bag_items, ensure_ascii=False),
+                time.time(),
+            ),
+        )
+
+
+def _load_cicada_snapshot(discord_id: int) -> Optional[tuple[int, int, list[tuple[str, int]], float]]:
+    """读取春秋蝉存档点，无存档返回 None。返回 (额度, 存款, 背包物品列表, 标记时间)。"""
+    with sqlite3.connect(DB_PATH) as conn:
+        row = conn.execute(
+            """
+            SELECT quota, bank_balance, bag_items, created_at
+            FROM cicada_snapshots WHERE discord_id = ?
+            """,
+            (discord_id,),
+        ).fetchone()
+    if row is None:
+        return None
+    bag_items = [(item[0], int(item[1])) for item in json.loads(row[2])]
+    return row[0], row[1], bag_items, row[3]
+
+
 def add_buff_guarded(discord_id: int, buff_key: str) -> bool:
     """圣剑守护的 add_buff：持有圣剑时 debuff 无法附加（返回 False），其余正常附加。"""
     if buff_key in DEBUFF_BUFFS and has_holy_blade(discord_id):
@@ -674,6 +767,7 @@ UNIQUE_HOLDER_ACCESSORS = {
     "lordparasol": (set_lord_parasol_holder, get_lord_parasol_holder, has_lord_parasol, "lord_parasol_holder"),
     "swordstone": (set_sword_stone_holder, get_sword_stone_holder, has_sword_stone, "sword_stone_holder"),
     "holyblade": (set_holy_blade_holder, get_holy_blade_holder, has_holy_blade, "holy_blade_holder"),
+    "cicada": (set_cicada_holder, get_cicada_holder, has_cicada, "cicada_holder"),
 }
 
 
@@ -856,6 +950,23 @@ def clear_user_items(discord_id: int) -> tuple[list[str], list[str]]:
     return bag_names, unique_names
 
 
+def clear_user_bag_items(discord_id: int) -> list[str]:
+    """清空用户全部背包道具（不动唯一道具与身上状态），返回被清空的「名称×数量」列表。
+
+    春秋蝉回溯时间用：唯一道具（含春秋蝉自身）不受影响。"""
+    with sqlite3.connect(DB_PATH) as conn:
+        rows = conn.execute(
+            "SELECT card_key, remaining FROM gacha_effects WHERE discord_id = ? AND remaining > 0",
+            (discord_id,),
+        ).fetchall()
+        conn.execute("DELETE FROM gacha_effects WHERE discord_id = ?", (discord_id,))
+    bag_names = []
+    for card_key, remaining in rows:
+        name, _, _ = CARD_POOL.get(card_key, (card_key, "", 0))
+        bag_names.append(f"{name}×{remaining}")
+    return bag_names
+
+
 def steal_random_card(robber_id: int, target_id: int) -> Optional[str]:
     """抢劫成功时随机偷取对方身上一个道具（含全部唯一道具），返回道具名称，无道具可偷返回 None。"""
     candidates = [card_key for card_key, _ in get_user_cards(target_id)]
@@ -879,6 +990,8 @@ def steal_random_card(robber_id: int, target_id: int) -> Optional[str]:
         candidates.append("swordstone")
     if has_holy_blade(target_id):
         candidates.append("holyblade")
+    if has_cicada(target_id):
+        candidates.append("cicada")
     if not candidates:
         return None
     card_key = random.choice(candidates)
@@ -902,6 +1015,8 @@ def steal_random_card(robber_id: int, target_id: int) -> Optional[str]:
         set_sword_stone_holder(robber_id)
     elif card_key == "holyblade":
         set_holy_blade_holder(robber_id)
+    elif card_key == "cicada":
+        set_cicada_holder(robber_id)
     else:
         # 偷来的道具叠加到自己的背包（+1），不重置已有数量
         consume_effect(target_id, card_key)
@@ -1138,6 +1253,20 @@ async def handle_gacha(
             )
         return
 
+    # 春秋蝉：唯一道具，立即替换持有者
+    if card_key == "cicada":
+        old_holder = get_cicada_holder()
+        set_cicada_holder(message.author.id)
+        transfer_note = ""
+        if old_holder and old_holder != message.author.id:
+            transfer_note = f"\n🦋 春秋蝉已从 <@{old_holder}> 手中转移！"
+        await message.channel.send(
+            f"🎴 {message.author.mention} 消耗 {cost} 点抽卡……\n"
+            f"🦋 **{name}**！{desc}。{transfer_note}\n"
+            f"⏳ 现在发送「{CICADA_MARK_KEYWORD}」标记存档点，发送「{CICADA_REWIND_KEYWORD}」回到过去！"
+        )
+        return
+
     # 错误：立即结算，额度重置为随机值
     if card_key == "error":
         await _settle_error(message, client)
@@ -1276,6 +1405,13 @@ async def _handle_multidraw(
                 lines.append(f"{i+1}. 🗡️ **石中剑**入手！与 **神性** 共鸣，⚡✨ 融合成 **圣剑**！梭哈成功率常驻 {round(HOLY_BLADE_ALLIN_SUCCESS_CHANCE*100)}%，驱散并免疫一切 debuff！{transfer_note}")
             else:
                 lines.append(f"{i+1}. 🗡️ **{name}**！{desc}{transfer_note}")
+            continue
+
+        if card_key == "cicada":
+            old_holder = get_cicada_holder()
+            set_cicada_holder(message.author.id)
+            transfer_note = f"（从 <@{old_holder}> 手中转移）" if old_holder and old_holder != message.author.id else ""
+            lines.append(f"{i+1}. 🦋 **{name}**！{desc}{transfer_note}")
             continue
 
         if card_key == "error":
@@ -1581,6 +1717,8 @@ async def _settle_sellout(
         items.append(("swordstone", 1, True))
     if has_holy_blade(message.author.id):
         items.append(("holyblade", 1, True))
+    if has_cicada(message.author.id):
+        items.append(("cicada", 1, True))
 
     if not items:
         await message.channel.send("🏷️ 你身上没有任何道具卡牌，变卖家产无效果。")
@@ -1606,6 +1744,7 @@ async def _settle_sellout(
                 "lordparasol": "lord_parasol_holder",
                 "swordstone": "sword_stone_holder",
                 "holyblade": "holy_blade_holder",
+                "cicada": "cicada_holder",
             }[card_key]
             with sqlite3.connect(DB_PATH) as conn:
                 conn.execute(
@@ -2156,6 +2295,136 @@ async def handle_d6(message: discord.Message, client: httpx.AsyncClient) -> None
         result.append("🌀 身上状态重置：\n" + "\n".join(buff_lines))
     result.append(f"💰 当前额度 {new_quota} 点。")
     await message.channel.send("\n\n".join(result))
+
+
+async def handle_cicada_mark(message: discord.Message, client: httpx.AsyncClient) -> None:
+    """春秋蝉「标记时间」：把当前的额度/银行存款/背包物品存为存档点。"""
+    if not has_cicada(message.author.id):
+        await message.channel.send(f"🦋 你没有「春秋蝉」，无法使用「{CICADA_MARK_KEYWORD}」。")
+        return
+
+    quota = await query_quota(client, message.author.name)
+    if quota is None:
+        await message.channel.send("🦋 查询额度失败，请稍后再试。")
+        return
+    bank_balance = _get_balance(message.author.id)
+    bag_items = get_user_cards(message.author.id)
+
+    _save_cicada_snapshot(message.author.id, quota, bank_balance, bag_items)
+
+    lines = [f"🦋 {message.author.mention} 发动 **{CICADA_MARK_KEYWORD}**！蝉鸣声定格了此刻："]
+    lines.append(f"💰 额度 **{quota} 点**、🏦 存款 **{bank_balance} 点** 已记入存档点。")
+    if bag_items:
+        bag_desc = "、".join(
+            f"{CARD_POOL.get(key, (key, '', 0))[0]}×{count}" for key, count in bag_items
+        )
+        lines.append(f"🎒 背包物品已记入存档：{bag_desc}")
+    else:
+        lines.append("🎒 背包空空如也，也已一并记入存档。")
+    if has_effect(message.author.id, "yourname"):
+        lines.append(
+            f"⏳ 发送「{CICADA_REWIND_KEYWORD}」可回到此刻——💫 受「你的名字」羁绊牵引，必定成功！"
+        )
+    else:
+        lines.append(
+            f"⏳ 发送「{CICADA_REWIND_KEYWORD}」可回到此刻——"
+            f"{round(CICADA_REWIND_FAIL_CHANCE*100)}% 概率迷失在光阴长河！"
+        )
+    await message.channel.send("\n".join(lines))
+
+
+async def handle_cicada_rewind(message: discord.Message, client: httpx.AsyncClient) -> None:
+    """春秋蝉「回溯时间」：50% 回到存档点，50% 迷失在光阴长河失去一切。
+
+    成功：当前额度/存款/背包物品被存档点覆盖（存档点保留可反复回溯），春秋蝉跟着一起回去；
+    失败：失去当前所有额度/存款/背包物品，存档点一并湮灭。
+    羁绊牵引：持有「你的名字」时必定成功。
+    """
+    if not has_cicada(message.author.id):
+        await message.channel.send(f"🦋 你没有「春秋蝉」，无法使用「{CICADA_REWIND_KEYWORD}」。")
+        return
+
+    snapshot = _load_cicada_snapshot(message.author.id)
+    if snapshot is None:
+        await message.channel.send(
+            f"🦋 光阴长河中没有你的存档点：先发送「{CICADA_MARK_KEYWORD}」再来回溯吧。"
+        )
+        return
+    snap_quota, snap_balance, snap_bag, snap_at = snapshot
+
+    # 读取当前状态（先读后改，失败分支也要用）
+    cur_quota = await query_quota(client, message.author.name)
+    if cur_quota is None:
+        await message.channel.send("🦋 查询额度失败，请稍后再试。")
+        return
+    cur_balance = _get_balance(message.author.id)
+
+    await message.channel.send(f"🦋 {message.author.mention} 发动 **{CICADA_REWIND_KEYWORD}**！蝉翼震颤，光阴开始倒流……")
+
+    # 羁绊牵引：持有「你的名字」时必定成功，不掷骰
+    bonded = has_effect(message.author.id, "yourname")
+    if bonded:
+        await message.channel.send(f"💫 「你的名字」的羁绊牵引着春秋蝉，光阴长河无法吞没你！")
+
+    # 50% 迷失在光阴长河：失去所有额度/存款/背包物品，存档点湮灭
+    if not bonded and random.random() < CICADA_REWIND_FAIL_CHANCE:
+        if cur_quota > 0:
+            deducted = await adjust_quota(client, "deduct", message.author.name, cur_quota)
+            if deducted is None:
+                await message.channel.send("🦋 扣除额度失败，请稍后再试。")
+                return
+        _set_balance(message.author.id, 0)
+        lost_bag = clear_user_bag_items(message.author.id)
+        # 存档点湮灭：迷失的人再也回不去了
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.execute(
+                "DELETE FROM cicada_snapshots WHERE discord_id = ?",
+                (message.author.id,),
+            )
+        lines = [
+            f"🌊 **迷失在光阴长河！**",
+            f"💰 额度 **{cur_quota} 点**、🏦 存款 **{cur_balance} 点** 已尽数失去！",
+        ]
+        if lost_bag:
+            bag_desc = "、".join(lost_bag)
+            lines.append(f"🎒 背包物品已尽数失去：{bag_desc}")
+        lines.append("🕯️ 存档点已湮灭，再也无法回到过去。春秋蝉仍在你的肩头，静静等待下一次蝉鸣。")
+        await message.channel.send("\n".join(lines))
+        return
+
+    # 回溯成功：清空当前额度/存款/背包，再恢复存档点
+    if cur_quota > 0:
+        deducted = await adjust_quota(client, "deduct", message.author.name, cur_quota)
+        if deducted is None:
+            await message.channel.send("🦋 扣除额度失败，请稍后再试。")
+            return
+    _set_balance(message.author.id, 0)
+    clear_user_bag_items(message.author.id)
+
+    if snap_quota > 0:
+        granted = await adjust_quota(client, "grant", message.author.name, snap_quota)
+        if granted is None:
+            await message.channel.send("🦋 恢复额度失败，请联系管理员。")
+            return
+    _set_balance(message.author.id, snap_balance)
+    for card_key, remaining in snap_bag:
+        _add_effect(message.author.id, card_key, remaining)
+
+    mark_age = int(time.time() - snap_at)
+    lines = [
+        f"⏳ **时光倒流成功！**回到了 {mark_age} 秒前的存档点。",
+        f"💰 额度恢复为 **{snap_quota} 点**（回溯前 {cur_quota} 点），"
+        f"🏦 存款恢复为 **{snap_balance} 点**（回溯前 {cur_balance} 点）。",
+    ]
+    if snap_bag:
+        bag_desc = "、".join(
+            f"{CARD_POOL.get(key, (key, '', 0))[0]}×{count}" for key, count in snap_bag
+        )
+        lines.append(f"🎒 背包物品已恢复：{bag_desc}")
+    else:
+        lines.append("🎒 存档点的背包空空如也，现在也一样。")
+    lines.append("🦋 春秋蝉跟着你一起回到了过去。存档点仍在，可再次回溯。")
+    await message.channel.send("\n".join(lines))
 
 
 class WishPoolView(discord.ui.View):

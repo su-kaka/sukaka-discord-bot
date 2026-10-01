@@ -72,6 +72,7 @@ start_roulette(bot)
 - **仇恨也是状态 buff**：抢银行成功后 `add_buff(user, "hatred")` 写入 `active_buffs` 表（原 bank.db 的 `bank_hatred` 表已废弃删除），存钱时 `has_buff`/`remove_buff` 触发没收并消耗。仇恨与其他 buff 一样随「我的卡牌」的「身上状态」区展示，且 D6 掷骰时既是可重置来源、也是重置候选目标。
 - **诅咒之眼**（`curse.py` 的 `_settle_curse_eye`）：持有者发送 `诅咒 @某人` 时**在普通诅咒流程（押 10 点、必输 debuff）正常结算之后额外叠加**——目标额度重置为 `CURSE_EYE_QUOTA_MIN`-`CURSE_EYE_QUOTA_MAX`（0-1000）随机值，每次使用 `CURSE_EYE_DESTROY_CHANCE`（44.44%）概率销毁（`clear_curse_eye_holder`）。效果**无法被借刀杀人反弹**（借刀杀人只转嫁普通诅咒）；持有者**无视诅咒冷却**（不检查也不写入 `curse_cooldowns`），可发送 `诅咒 @自己`（不押点，仅诅咒之眼效果，不入诅咒名单）。普通诅咒逻辑不变，未持有者无此效果。
 - 身体交换（你的名字卡）存 `body_swaps` 表，`restore_body_swaps` 后台任务在 5 分钟后换回。
+- **春秋蝉**（`gacha.py` 的 `handle_cicada_mark` / `handle_cicada_rewind`）：唯一道具，持有者发送「标记时间」把当前**额度/银行存款/背包物品**（不含唯一道具与身上状态）写入 `cicada_snapshots` 表存档点（每人一份，覆盖旧档）；发送「回溯时间」掷骰——`CICADA_REWIND_FAIL_CHANCE`（50%）失败：**迷失在光阴长河**，当前额度/存款/背包物品全失（存档点湮灭，春秋蝉保留可再标记）；50% 成功：清空当前额度/存款/背包后恢复存档点内容（额度走 API 先扣后发，存款走 `_set_balance`，背包 `_add_effect` 逐项恢复），**春秋蝉跟着一起回去**且存档点保留可反复回溯。**羁绊牵引**：回溯时持有「你的名字」（背包道具，`has_effect` 判定不消耗）则必定成功。唯一道具不在快照范围（回溯不会增减唯一道具），身上状态 buff 同样不受回溯影响。被抽到/抢走/变卖/D6 重置时与其他唯一道具同规则转移。
 - **循环依赖规避惯例**：`packet_base.py`、`quota_drop.py` 等在函数体内延迟 `from roulette.gacha import ...`，因为 gacha 又 import 了 packet_base。新增跨模块引用时沿用此惯例。
 - 立即结算型卡牌（劫富济贫/自爆/错误/通货膨胀/存为王/变卖家产/虚弱）不写 `gacha_effects`，抽到即触发。**虚弱**抽中立即附加 `weak` 状态 buff（存 `active_buffs` 表），`rob.py` 用 `remove_buff(target, "weak")` 消耗：被抢劫必定被抢成功。变卖家产**从背包随机选出若干种道具，每种卖掉全部持有数量**（唯一道具卖掉后清除持有记录），按 `GACHA_SELLOUT_PRICE`（100 点/张）发放额度。各即时结算函数均带可选 `announce` 参数：黑市购买即时生效卡时传 `announce=False` 静默结算，由黑市自己播报购买结果。
 
@@ -102,7 +103,7 @@ start_roulette(bot)
 
 | DB | 表 | 说明 |
 | --- | --- | --- |
-| `gacha.db` | gacha_effects / snake_charm_holder / membership_card_holder / meteor_shower_holder / collector_card_holder / curse_eye_holder / divinity_holder / d6_holder / lord_parasol_holder / active_buffs / body_swaps / offline_users | 卡牌效果、唯一道具、状态 buff 与特殊状态 |
+| `gacha.db` | gacha_effects / snake_charm_holder / membership_card_holder / meteor_shower_holder / collector_card_holder / curse_eye_holder / divinity_holder / d6_holder / lord_parasol_holder / sword_stone_holder / holy_blade_holder / cicada_holder / cicada_snapshots / active_buffs / body_swaps / offline_users | 卡牌效果、唯一道具（含春秋蝉存档点）与特殊状态 |
 | `black_market.db` | black_market_shelf | 黑市货架（全服共享，卖光自动重置） |
 | `bank.db` | bank_accounts / bank_heist_cooldowns 等 | 银行存款与抢劫 |
 | `lottery.db` | lottery_pool | 彩票奖池（单行） |
