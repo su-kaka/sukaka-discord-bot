@@ -2310,13 +2310,6 @@ async def handle_cicada_mark(message: discord.Message, client: httpx.AsyncClient
     bank_balance = _get_balance(message.author.id)
     bag_items = get_user_cards(message.author.id)
 
-    # 多次标记：新存档点直接覆盖上一个节点（每人仅保留最新存档）
-    old_snapshot = _load_cicada_snapshot(message.author.id)
-    overwrite_note = ""
-    if old_snapshot is not None:
-        old_age = int(time.time() - old_snapshot[3])
-        overwrite_note = f"\n🔁 已覆盖上一个存档点（{old_age} 秒前标记的节点已湮灭）"
-
     _save_cicada_snapshot(message.author.id, quota, bank_balance, bag_items)
 
     lines = [f"🦋 {message.author.mention} 发动 **{CICADA_MARK_KEYWORD}**！蝉鸣声定格了此刻："]
@@ -2328,7 +2321,6 @@ async def handle_cicada_mark(message: discord.Message, client: httpx.AsyncClient
         lines.append(f"🎒 背包物品已记入存档：{bag_desc}")
     else:
         lines.append("🎒 背包空空如也，也已一并记入存档。")
-    lines.append(overwrite_note)
     if has_effect(message.author.id, "yourname"):
         lines.append(
             f"⏳ 发送「{CICADA_REWIND_KEYWORD}」可回到此刻——💫 受「你的名字」羁绊牵引，必定成功！"
