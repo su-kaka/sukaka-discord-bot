@@ -1,4 +1,6 @@
-"""每日发言奖励：监听固定频道，每个自然日（北京时间）首次发言静默发放活动额度。"""
+"""每日发言奖励：监听固定频道，每个自然日（北京时间）首次发言静默发放活动额度。
+
+关键词命中排除列表（打卡/签到/发言）的发言不触发，避免无意义灌水。"""
 
 from __future__ import annotations
 
@@ -19,6 +21,8 @@ if TYPE_CHECKING:
 DAILY_BONUS_CHANNEL_ID = 1455038454772531311  # 监听频道（轮播/家庭组频道）
 DAILY_BONUS_AMOUNT = 1500  # 每日首次发言发放额度
 DAILY_BONUS_UTC_OFFSET_SECONDS = 8 * 3600  # 北京时间相对 UTC 的固定偏移（无夏令时）
+# 命中任一关键词的发言不算「有效发言」，防止为领奖励刷无意义内容
+DAILY_BONUS_EXCLUDED_KEYWORDS = ("打卡", "签到", "发言")
 DB_PATH = data_file("DAILY_BONUS_DB", "daily_bonus.db")
 
 
@@ -72,6 +76,9 @@ def start_daily_bonus(bot: "SukakaBot") -> None:
 
     async def handle_message(message: discord.Message) -> None:
         """频道内任意用户发言：当日首次发放额度，静默无提醒。"""
+        content = message.content or ""
+        if any(keyword in content for keyword in DAILY_BONUS_EXCLUDED_KEYWORDS):
+            return
         discord_id = str(message.author.id)
         day = _beijing_today()
         if not _try_claim(discord_id, day):
@@ -92,5 +99,6 @@ def start_daily_bonus(bot: "SukakaBot") -> None:
     bot.register_message_handler(DAILY_BONUS_CHANNEL_ID, handle_message)
     print(
         f"[DailyBonus] 已启动，监听频道 {DAILY_BONUS_CHANNEL_ID}，"
-        f"每个自然日（北京时间）首次发言静默 +{DAILY_BONUS_AMOUNT} 点，数据库 {DB_PATH}"
+        f"每个自然日（北京时间）首次发言静默 +{DAILY_BONUS_AMOUNT} 点，"
+        f"含「{'」「'.join(DAILY_BONUS_EXCLUDED_KEYWORDS)}」的发言不触发，数据库 {DB_PATH}"
     )
