@@ -1,5 +1,4 @@
 大锅饭网址：https://catiecli.sukaka.top/
-- GCLI凭证报错`403 You do not have a valid license`→开通 Pro，或找可用的家庭组
 - Pro凭证（学生/企业）→**500Pro+4000Flash+4000Flash-lite**
 - Free凭证→**1500Flash+1500Flash-lite**
 - 无凭证在本贴发言每天→**1500Flash**（可用3f 3.5f 3.8f）
