@@ -17,6 +17,7 @@ from channel_admin import (  # noqa: E402
     register_commands,
     start_channel_mute_restores,
 )
+from daily_bonus import start_daily_bonus  # noqa: E402
 from mama import register_commands as register_mama_commands  # noqa: E402
 from roulette import start_roulette  # noqa: E402
 
@@ -58,6 +59,7 @@ class SukakaBot(discord.Client):
         self._carousel_started = False
         self._carousel_task: Optional[asyncio.Task[None]] = None
         self._roulette_started = False
+        self._daily_bonus_started = False
 
     async def setup_hook(self) -> None:
         register_commands(self)
@@ -87,6 +89,9 @@ class SukakaBot(discord.Client):
         if not self._roulette_started:
             self._roulette_started = True
             start_roulette(self)
+        if not self._daily_bonus_started:
+            self._daily_bonus_started = True
+            start_daily_bonus(self)
         print(f"Logged in as {self.user} ({self.user.id})")
 
 

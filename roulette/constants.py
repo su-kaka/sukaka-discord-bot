@@ -1,5 +1,6 @@
 """roulette 包共享常量。"""
 
+ROULETTE_ENABLED = False  # 一键总开关：设为 False 后整个 roulette（所有小游戏、掉落、定时任务）关闭
 QUOTA_CHANNEL_ID = 1545664527410929745
 DEFAULT_API_BASE = "https://catiecli.sukaka.top"
 

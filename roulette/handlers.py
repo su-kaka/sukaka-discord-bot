@@ -73,6 +73,7 @@ from roulette.constants import (
     RED_PACKET_MIN_COST,
     ROB_KEYWORD,
     RULES_KEYWORD,
+    ROULETTE_ENABLED,
     SEDUCE_KEYWORD,
     TRIGGER_KEYWORD,
     YOURNAME_KEYWORD,
@@ -119,6 +120,10 @@ if TYPE_CHECKING:
 
 def start_roulette(bot: "SukakaBot") -> None:
     """注册游戏区的消息入口：赌大小触发 + 「来财」掉落。"""
+    if not ROULETTE_ENABLED:
+        print("[Roulette] 总开关已关闭（constants.ROULETTE_ENABLED = False），跳过启动")
+        return
+
     client = httpx.AsyncClient(timeout=API_TIMEOUT_SECONDS)
     current_banker: dict[str, Optional[discord.Member | discord.User]] = {"banker": None}
     active_begs: dict[int, BegView] = {}
