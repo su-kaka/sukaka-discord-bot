@@ -11,9 +11,10 @@ start_carousel(bot)  →  asyncio.create_task(carousel_loop(bot), name="carousel
 `carousel_loop` 是无限循环，每轮：
 
 1. 计算距下一个对齐时刻的秒数并 sleep（**对齐到墙钟时间**，例如间隔 10 分钟则固定在 10:00、10:10、10:20 发送，而不是「上一次发送后 10 分钟」）；
-2. 读取 `docs/carousel-content.md`（UTF-8）全文，为空则跳过本轮；
-3. 发送到 `CAROUSEL_CHANNEL_ID`，`delete_after=interval_minutes * 60`；
-4. 任何异常（文件不存在、频道找不到、Discord 报错）只 `print` 不中断循环。
+2. 获取 `CAROUSEL_CHANNEL_ID` 频道；**首轮**先回查频道最近 25 条历史，删除本机器人遗留的旧轮播消息（应对 `delete_after` 随重启丢失）；
+3. 读取 `docs/carousel-content.md`（UTF-8）全文，为空则跳过本轮发送；
+4. 发送到目标频道，`delete_after=interval_minutes * 60`；
+5. 任何异常（文件不存在、频道找不到、Discord 报错）只 `print` 不中断循环。
 
 ## 可配置项
 
@@ -35,8 +36,8 @@ CAROUSEL_INTERVAL_MINUTES=1
 
 - **墙钟对齐**（`seconds_until_next_slot`）：`remaining = interval - (now % interval)`，若恰好落在对齐点上则本轮立即发送。好处是重启机器人不会打乱发布节奏。
 - **频道获取兜底**：先 `bot.get_channel`（缓存）， miss 则 `fetch_channel`（API 请求）；只接受 `TextChannel` / `Thread`，否则视为配置错误跳过本轮。
-- **自动删旧**：靠 `delete_after` 实现，机器人不维护任何消息引用状态。代价：机器人重启后**正在显示的那条不会有人去删**，会多留一个周期（下一条发出时旧条已到期自然消失；若改过间隔则可能短暂出现两条）。
-- **无状态**：模块不落盘任何数据，重启无副作用（`_carousel_started` 标志见 bot.md）。
+- **自动删旧**：靠 `delete_after` 实现，机器人不维护任何消息引用状态。`delete_after` 的删除任务只存在于进程内，重启即丢失；因此循环首轮会先扫描频道最近 `STALE_SCAN_LIMIT`（25）条消息，把本机器人遗留的旧轮播消息删掉再发送，保证重启后频道里也只有一条轮播公告。
+- **无状态**：模块不落盘任何数据，重启恢复靠频道历史回查（`_carousel_started` 标志见 bot.md）。
 
 ## 与其他模块的关系
 
