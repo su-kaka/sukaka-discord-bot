@@ -1,6 +1,6 @@
 """每日发言奖励：监听固定频道，每个自然日（北京时间）首次发言静默发放活动额度。
 
-关键词命中排除列表（打卡/签到/发言）的发言不触发，避免无意义灌水。"""
+关键词命中排除列表（打卡/签到/发言/来财/早）的发言不触发，避免无意义灌水。"""
 
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ DAILY_BONUS_CHANNEL_ID = 1455038454772531311  # 监听频道（轮播/家庭组�
 DAILY_BONUS_AMOUNT = 1500  # 每日首次发言发放额度
 DAILY_BONUS_UTC_OFFSET_SECONDS = 8 * 3600  # 北京时间相对 UTC 的固定偏移（无夏令时）
 # 命中任一关键词的发言不算「有效发言」，防止为领奖励刷无意义内容
-DAILY_BONUS_EXCLUDED_KEYWORDS = ("打卡", "签到", "发言", "来财" )
+DAILY_BONUS_EXCLUDED_KEYWORDS = ("打卡", "签到", "发言", "来财", "早")
 DB_PATH = data_file("DAILY_BONUS_DB", "daily_bonus.db")
 
 
