@@ -20,6 +20,7 @@ start_carousel(bot)  →  asyncio.create_task(carousel_loop(bot), name="carousel
 
 | 变量 | 默认 | 说明 |
 | --- | --- | --- |
+| `CAROUSEL_ENABLED`（常量） | `True` | 总开关；改为 `False` 彻底关闭轮播（不启动任务），**改代码** |
 | `CAROUSEL_CHANNEL_ID`（常量） | `1455038454772531311` | 目标频道，**改代码** |
 | `CAROUSEL_FILE`（env） | `docs/carousel-content.md` | 轮播内容文件路径 |
 | `CAROUSEL_INTERVAL_MINUTES`（env） | `1` | 间隔分钟数，可为小数；非正数/非法值自动回退默认并打印警告 |
@@ -47,5 +48,6 @@ CAROUSEL_INTERVAL_MINUTES=1
 ## 常见改动
 
 - **换频道**：改文件顶部 `CAROUSEL_CHANNEL_ID`。
+- **彻底关闭轮播**：改文件顶部 `CAROUSEL_ENABLED = False`，重启后不再启动轮播任务。
 - **改间隔**：改 `.env` 的 `CAROUSEL_INTERVAL_MINUTES`，重启生效。
 - **多条轮播内容轮换**：把 `docs/carousel-content.md` 改成多段（如用 `---` 分隔），在 `carousel_loop` 里维护索引逐轮取下一段；或直接复制本模块做一个新的（见 [extending-guide.md](extending-guide.md)）。

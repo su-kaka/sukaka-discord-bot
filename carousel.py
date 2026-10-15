@@ -2,9 +2,11 @@ import asyncio
 import os
 import time
 from pathlib import Path
+from typing import Optional
 
 import discord
 
+CAROUSEL_ENABLED = True  # 总开关：改为 False 可彻底关闭轮播（不启动轮播任务）
 CAROUSEL_CHANNEL_ID = 1455038454772531311
 CAROUSEL_FILE = Path(os.getenv("CAROUSEL_FILE", "docs/carousel-content.md"))
 DEFAULT_CAROUSEL_INTERVAL_MINUTES = 1
@@ -107,7 +109,10 @@ async def carousel_loop(client: discord.Client) -> None:
             print(f"Failed to send carousel message: {exc}")
 
 
-def start_carousel(client: discord.Client) -> asyncio.Task[None]:
+def start_carousel(client: discord.Client) -> Optional[asyncio.Task[None]]:
+    if not CAROUSEL_ENABLED:
+        print("Carousel disabled by switch; skipping start")
+        return None
     return asyncio.create_task(
         carousel_loop(client),
         name="carousel-message-loop",

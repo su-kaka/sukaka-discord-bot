@@ -18,6 +18,7 @@ from roulette.constants import API_TIMEOUT_SECONDS
 if TYPE_CHECKING:
     from bot import SukakaBot
 
+DAILY_BONUS_ENABLED = False  # 总开关：改为 False 可彻底关闭每日发言奖励（不建库、不监听频道）
 DAILY_BONUS_CHANNEL_ID = 1455038454772531311  # 监听频道（轮播/家庭组频道）
 DAILY_BONUS_AMOUNT = 1500  # 每日首次发言发放额度
 DAILY_BONUS_UTC_OFFSET_SECONDS = 8 * 3600  # 北京时间相对 UTC 的固定偏移（无夏令时）
@@ -71,6 +72,9 @@ def _rollback_claim(discord_id: str, day: str) -> None:
 
 def start_daily_bonus(bot: "SukakaBot") -> None:
     """初始化：建库、注册消息入口、打印启动日志。"""
+    if not DAILY_BONUS_ENABLED:
+        print("[DailyBonus] 已通过开关关闭，跳过启动")
+        return
     _init_db()
     client = httpx.AsyncClient(timeout=API_TIMEOUT_SECONDS)
 

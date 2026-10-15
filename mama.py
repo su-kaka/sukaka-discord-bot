@@ -17,6 +17,7 @@ from paths import data_file
 if TYPE_CHECKING:
     from bot import SukakaBot
 
+MAMA_ENABLED = False  # 总开关：改为 False 可彻底关闭找妈妈功能（不注册任何斜杠命令）
 MAMA_CHANNEL_ID = 1455038454772531311  # 只在这个频道响应 mama 斜杠命令
 
 # /找妈妈 需要持有以下身份组之一；没有则引导去领频道消息处领取
@@ -397,6 +398,9 @@ def register_commands(bot: "SukakaBot") -> None:
     其他频道里提示「仅限找妈妈频道」；/拉黑 /解除拉黑 /拉黑列表 不限频道，
     但仅限 BLOCK_COMMAND_USER_IDS 里的管理员使用。
     """
+    if not MAMA_ENABLED:
+        print("[Mama] 已通过开关关闭，跳过命令注册")
+        return
 
     async def _deny_if_wrong_channel(interaction: discord.Interaction) -> bool:
         """频道白名单检查：不在找妈妈频道时回复提示并返回 True。"""
