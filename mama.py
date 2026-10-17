@@ -17,7 +17,7 @@ from paths import data_file
 if TYPE_CHECKING:
     from bot import SukakaBot
 
-MAMA_ENABLED = False  # 总开关：改为 False 可彻底关闭找妈妈功能（不注册任何斜杠命令）
+MAMA_ENABLED = True  # 总开关：改为 False 可彻底关闭找妈妈功能（不注册任何斜杠命令）
 MAMA_CHANNEL_ID = 1455038454772531311  # 只在这个频道响应 mama 斜杠命令
 
 # /找妈妈 需要持有以下身份组之一；没有则引导去领频道消息处领取
