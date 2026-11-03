@@ -49,6 +49,7 @@ REGION_MAX_LENGTH = 50  # 区域输入框长度上限（保证能进 Select desc
 NOTE_MAX_LENGTH = 200  # 备注输入框长度上限
 PAGE_SIZE = 10  # /找妈妈 列表每页行数（每行 1 个 TextDisplay + 对应名字按钮，40 组件上限内安全）
 ACTION_ROW_MAX_BUTTONS = 5  # Discord 单个 ActionRow 按钮硬上限（详情按钮按行分组用）
+REGISTRATION_TTL_SECONDS = 7 * 24 * 3600  # 登记有效期（7 天），过期自动删除；重新登记即续期
 MESSAGE_MAX_CHARS = 1800  # 单条消息字符上限（Discord 限 2000，留余量）
 
 
@@ -89,9 +90,22 @@ def _init_db() -> None:
         )
 
 
+def _purge_expired_registrations(conn: sqlite3.Connection) -> None:
+    """删除超过 TTL 未更新的登记（过期判定基于 updated_at：重新登记即续期）。
+
+    惰性清理：跟随读操作执行，不需要后台循环任务。传入已打开的连接，
+    与调用方的查询合并进同一个事务。
+    """
+    conn.execute(
+        "DELETE FROM mama_registrations WHERE updated_at < ?",
+        (time.time() - REGISTRATION_TTL_SECONDS,),
+    )
+
+
 def get_registration(discord_id: int) -> Optional[MamaRegistration]:
-    """查单人登记，用于 Modal 预填 / 删除存在性检查 / Select 回调复核。"""
+    """查单人登记，用于 Modal 预填 / 删除存在性检查 / 详情回调复核（顺带清理过期）。"""
     with sqlite3.connect(DB_PATH) as conn:
+        _purge_expired_registrations(conn)
         row = conn.execute(
             "SELECT discord_id, display_name, region, note, created_at"
             " FROM mama_registrations WHERE discord_id = ?",
@@ -132,8 +146,9 @@ def delete_registration(discord_id: int) -> bool:
 
 
 def get_all_registrations() -> list[MamaRegistration]:
-    """返回全部登记，按首次登记时间升序（组内排序稳定）。"""
+    """返回全部登记，按首次登记时间升序（组内排序稳定；顺带清理过期）。"""
     with sqlite3.connect(DB_PATH) as conn:
+        _purge_expired_registrations(conn)
         rows = conn.execute(
             "SELECT discord_id, display_name, region, note, created_at"
             " FROM mama_registrations ORDER BY created_at ASC"
@@ -265,7 +280,9 @@ class RegisterModal(discord.ui.Modal):
         await interaction.response.send_message(
             f"👶 已保存你的登记！区域：{region}"
             + (f"，备注：{note}" if note else "")
-            + "。其他人发送 /找妈妈 可以看到你。",
+            + f"。\n⏳ 有效期 {REGISTRATION_TTL_SECONDS // (3600 * 24)} 天"
+            "，到期自动删除，需要继续当妈妈请重新登记。"
+            "\n其他人发送 /找妈妈 可以看到你。",
             ephemeral=True,
         )
 
@@ -323,6 +340,7 @@ class MamaListView(discord.ui.LayoutView):
         self.add_item(
             discord.ui.TextDisplay(
                 f"第 {page + 1} / {pages} 页 · 点名字按钮查看联系方式"
+                f" · 登记有效期为 {REGISTRATION_TTL_SECONDS // (3600 * 24)} 天，过期自动消失"
             )
         )
 
@@ -534,7 +552,9 @@ def register_commands(bot: "SukakaBot") -> None:
         await interaction.response.send_message(
             f"👶 登记/更新妈妈信息！{extra}\n"
             f"点击下方按钮操作（按钮 {PROMPT_VIEW_TIMEOUT // 60} 分钟内有效，"
-            "过期请重发 /登记妈妈）。",
+            f"过期请重发 /登记妈妈）。\n"
+            f"⏳ 登记有效期 {REGISTRATION_TTL_SECONDS // (3600 * 24)} 天"
+            "，到期自动删除；再次提交即重新计时。",
             view=RegisterPromptView(),
             ephemeral=True,
         )
