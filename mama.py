@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import math
 import os
 import re
 import sqlite3
 import time
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, NamedTuple, Optional
 
@@ -42,10 +44,11 @@ GUIDE_FILE = Path(os.getenv("MAMA_GUIDE_FILE", "docs/family-group-guide.md"))
 DB_PATH = data_file("MAMA_DB", "mama.db")
 
 PROMPT_VIEW_TIMEOUT = 300  # /登记妈妈 提示消息上的按钮有效期（秒）
-LIST_VIEW_TIMEOUT = 600  # /找妈妈 列表消息上的下拉菜单有效期（秒）
+LIST_VIEW_TIMEOUT = 600  # /找妈妈 列表消息上的翻页/详情按钮有效期（秒）
 REGION_MAX_LENGTH = 50  # 区域输入框长度上限（保证能进 Select description）
 NOTE_MAX_LENGTH = 200  # 备注输入框长度上限
-SELECT_MAX_OPTIONS = 25  # Discord Select 选项硬上限
+PAGE_SIZE = 10  # /找妈妈 列表每页行数（每行 1 个 TextDisplay + 对应名字按钮，40 组件上限内安全）
+ACTION_ROW_MAX_BUTTONS = 5  # Discord 单个 ActionRow 按钮硬上限（详情按钮按行分组用）
 MESSAGE_MAX_CHARS = 1800  # 单条消息字符上限（Discord 限 2000，留余量）
 
 
@@ -267,80 +270,138 @@ class RegisterModal(discord.ui.Modal):
         )
 
 
-class MamaSelect(discord.ui.Select):
-    """找妈妈列表上的下拉菜单：选中后仅本人可见地展示对方登记。"""
+class MamaListView(discord.ui.LayoutView):
+    """/找妈妈 列表（Components V2）：每页 PAGE_SIZE 行（TextDisplay）+ 对应名字按钮。
 
-    def __init__(self, options: list[discord.SelectOption]) -> None:
-        super().__init__(
-            placeholder="选择你要找的妈妈……",
-            options=options,
-            min_values=1,
-            max_values=1,
+    翻页/详情回调都重新查库后重建整页（列表发出后数据可能变化），重建的
+    组件经 edit_message 重注册派发。ephemeral 消息组件仅发起者可用，无需
+    owner 校验。
+    """
+
+    def __init__(self, rows: list[MamaRegistration], page: int = 0) -> None:
+        super().__init__(timeout=LIST_VIEW_TIMEOUT)
+        self.page = page
+        self._render(rows, page)
+
+    def _render(self, rows: list[MamaRegistration], page: int) -> None:
+        """把当前实例的组件重建为第 page 页（0 基）。调用方保证 rows 非空。
+
+        结构：标题 + 区域标题/行（每行一个 TextDisplay）+ 名字「详情」按钮排
+        （每 5 个一排，与上方行顺序对应）+ 分隔线/页脚 + 翻页排。
+        最坏情况（每行区域都不同）约 2*PAGE_SIZE+5 组件，Discord 单消息
+        40 组件上限下 PAGE_SIZE=10 安全。
+        """
+        total = len(rows)
+        pages = math.ceil(total / PAGE_SIZE)
+        page = max(0, min(page, pages - 1))  # 数据变少时页码回落
+        self.page = page
+
+        self.clear_items()
+        start = page * PAGE_SIZE
+        page_rows = rows[start : start + PAGE_SIZE]
+
+        self.add_item(discord.ui.TextDisplay(f"👶 **找妈妈登记列表**（共 {total} 人）"))
+        current_region: Optional[str] = None
+        for row in page_rows:
+            # 区域是自由文本：按相邻同区域分组渲染，跨页不合并
+            if row.region != current_region:
+                current_region = row.region
+                self.add_item(discord.ui.TextDisplay(f"**{current_region}**"))
+            line = f"- {row.mention}" + (f"：{row.note}" if row.note else "")
+            self.add_item(discord.ui.TextDisplay(line))
+
+        # 详情按钮排：与上方行顺序一一对应，标签用登记者名字；
+        # ActionRow 上限 5 个按钮，PAGE_SIZE=10 需拆成两排
+        detail_buttons = [self._detail_button(row) for row in page_rows]
+        for i in range(0, len(detail_buttons), ACTION_ROW_MAX_BUTTONS):
+            row = discord.ui.ActionRow()
+            for button in detail_buttons[i : i + ACTION_ROW_MAX_BUTTONS]:
+                row.add_item(button)
+            self.add_item(row)
+
+        self.add_item(discord.ui.Separator())
+        self.add_item(
+            discord.ui.TextDisplay(
+                f"第 {page + 1} / {pages} 页 · 点名字按钮查看联系方式"
+            )
         )
 
-    async def callback(self, interaction: discord.Interaction) -> None:
-        # 列表发出后对方可能已删除登记，回调时重新查库
-        row: Optional[MamaRegistration] = None
-        try:
-            row = get_registration(int(self.values[0]))
-        except (sqlite3.Error, ValueError) as exc:
-            print(f"[Mama] 查询登记失败：{exc}")
-        if row is None:
+        if pages > 1:
+            nav = discord.ui.ActionRow()
+            prev = discord.ui.Button(
+                label="上一页", emoji="⬅️", disabled=page == 0
+            )
+            prev.callback = self._make_pager(page - 1)
+            nav.add_item(prev)
+            next_ = discord.ui.Button(
+                label="下一页", emoji="➡️", disabled=page == pages - 1
+            )
+            next_.callback = self._make_pager(page + 1)
+            nav.add_item(next_)
+            self.add_item(nav)
+
+    def _make_pager(
+        self, target: int
+    ) -> "Callable[[discord.Interaction], Awaitable[None]]":
+        async def pager(interaction: discord.Interaction) -> None:
+            await self._refresh(interaction, target)
+
+        return pager
+
+    def _detail_button(
+        self, row: MamaRegistration
+    ) -> "discord.ui.Button['MamaListView']":
+        async def show_detail(interaction: discord.Interaction) -> None:
+            # 列表发出后对方可能已删除登记，回调时重新查库
+            try:
+                fresh = get_registration(row.discord_id)
+            except sqlite3.Error as exc:
+                print(f"[Mama] 查询登记失败：{exc}")
+                fresh = None
+            if fresh is None:
+                await interaction.response.send_message(
+                    "这条登记已不存在（可能已被删除），请重新发送 /找妈妈 刷新列表。",
+                    ephemeral=True,
+                )
+                return
+            # ephemeral 消息仅本人可见、不通知对方，引导直接联系
             await interaction.response.send_message(
-                "这条登记已不存在（可能已被删除），请重新发送 /找妈妈 刷新列表。",
+                f"👶 找 {fresh.mention} 妈妈！区域：{fresh.region}"
+                + (f"｜备注：{fresh.note}" if fresh.note else "")
+                + "\n请直接点击对方头像私信，或在频道里 @ 对方联系。",
                 ephemeral=True,
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
+
+        label = row.display_name or f"用户{row.discord_id % 100000}"
+        button = discord.ui.Button(
+            label=label[:80], style=discord.ButtonStyle.secondary
+        )
+        button.callback = show_detail
+        return button
+
+    async def _refresh(
+        self, interaction: discord.Interaction, target: int
+    ) -> None:
+        """翻页：重新查库 → 重建组件 → edit 原消息（edit_message 自动注册新组件派发）。"""
+        try:
+            rows = get_all_registrations()
+        except sqlite3.Error as exc:
+            print(f"[Mama] 读取登记列表失败：{exc}")
+            await interaction.response.send_message(
+                "读取登记列表失败，请稍后再试。", ephemeral=True
             )
             return
-        # ephemeral 消息仅本人可见、不通知对方，引导直接联系
-        await interaction.response.send_message(
-            f"👶 找 {row.mention} 妈妈！区域：{row.region}"
-            + (f"｜备注：{row.note}" if row.note else "")
-            + "\n请直接点击对方头像私信，或在频道里 @ 对方联系。",
-            ephemeral=True,
-        )
-
-
-class MamaSelectView(discord.ui.View):
-    """承载下拉菜单的容器，timeout 与菜单有效期对齐。"""
-
-    def __init__(self, rows: list[MamaRegistration]) -> None:
-        super().__init__(timeout=LIST_VIEW_TIMEOUT)
-        self.add_item(MamaSelect(_build_select_options(rows)))
-
-
-def _build_select_options(rows: list[MamaRegistration]) -> list[discord.SelectOption]:
-    """构造下拉菜单选项，超过上限时按登记时间截断到前 25 条。"""
-    options = []
-    for row in rows[:SELECT_MAX_OPTIONS]:
-        label = row.display_name or f"用户{row.discord_id % 100000}"
-        description = f"{row.region}｜{row.note}" if row.note else row.region
-        options.append(
-            discord.SelectOption(
-                label=label[:100],
-                value=str(row.discord_id),
-                description=description[:100],
+        if not rows:
+            # 全部登记都被删了：列表失去意义，直接把消息替换成空态提示
+            await interaction.response.edit_message(
+                content="当前还没有任何妈妈登记。想当妈妈的话，发 /登记妈妈 登记一下吧！",
+                view=None,
             )
-        )
-    return options
-
-
-def _render_list_text(rows: list[MamaRegistration]) -> str:
-    """按区域分组渲染登记列表成整段文本（分块交给 _split_text_chunks）。"""
-    grouped: dict[str, list[MamaRegistration]] = {}
-    for row in rows:
-        grouped.setdefault(row.region, []).append(row)
-
-    lines = ["👶 **找妈妈登记列表**"]
-    for region, members in grouped.items():
-        lines.append(f"\n**{region}**")
-        for row in members:
-            lines.append(f"- {row.mention}：{row.note}" if row.note else f"- {row.mention}")
-
-    footer = f"\n共 {len(rows)} 人已登记。在下方菜单选择一位妈妈，获取联系提示。"
-    if len(rows) > SELECT_MAX_OPTIONS:
-        footer += f"（下拉菜单最多显示前 {SELECT_MAX_OPTIONS} 位，按登记时间）"
-    lines.append(footer)
-    return "\n".join(lines)
+            self.stop()
+            return
+        self._render(rows, target)
+        await interaction.response.edit_message(view=self, allowed_mentions=None)
 
 
 def _split_text_chunks(text: str) -> list[str]:
@@ -502,24 +563,12 @@ def register_commands(bot: "SukakaBot") -> None:
             )
             return
 
-        # 列表不 ping 任何登记者（mention 仅渲染为 @名字，不产生通知）
-        no_mentions = discord.AllowedMentions.none()
-        view = MamaSelectView(rows)
-        chunks = _split_text_chunks(_render_list_text(rows))
+        # Components V2 分页列表；mention 仅渲染不 ping（v2 消息的 mention 同样不通知）
         await interaction.response.send_message(
-            chunks[0],
-            view=view if len(chunks) == 1 else None,
+            view=MamaListView(rows),
             ephemeral=True,
-            allowed_mentions=no_mentions,
+            allowed_mentions=discord.AllowedMentions.none(),
         )
-        for index, chunk in enumerate(chunks[1:], start=1):
-            # 后续分块走 followup；最后一块挂下拉菜单
-            await interaction.followup.send(
-                chunk,
-                view=view if index == len(chunks) - 1 else None,
-                ephemeral=True,
-                allowed_mentions=no_mentions,
-            )
 
     @bot.tree.command(
         name="家庭组教程",
