@@ -101,7 +101,12 @@ async def carousel_loop(client: discord.Client) -> None:
                 carousel_loop_cleaned = True
             content = CAROUSEL_FILE.read_text(encoding="utf-8").strip()
             if content:
-                await channel.send(content, delete_after=interval_minutes * 60)
+                # suppress_embeds：不自动解析链接，避免频道里出现大预览卡片
+                await channel.send(
+                    content,
+                    delete_after=interval_minutes * 60,
+                    suppress_embeds=True,
+                )
                 print(f"Carousel message sent to channel {CAROUSEL_CHANNEL_ID}")
         except FileNotFoundError:
             print(f"Carousel file not found: {CAROUSEL_FILE}")

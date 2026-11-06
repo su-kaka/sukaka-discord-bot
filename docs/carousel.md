@@ -13,7 +13,7 @@ start_carousel(bot)  →  asyncio.create_task(carousel_loop(bot), name="carousel
 1. 计算距下一个对齐时刻的秒数并 sleep（**对齐到墙钟时间**，例如间隔 10 分钟则固定在 10:00、10:10、10:20 发送，而不是「上一次发送后 10 分钟」）；
 2. 获取 `CAROUSEL_CHANNEL_ID` 频道；**首轮**先回查频道最近 25 条历史，删除本机器人遗留的旧轮播消息（应对 `delete_after` 随重启丢失）；
 3. 读取 `docs/carousel-content.md`（UTF-8）全文，为空则跳过本轮发送；
-4. 发送到目标频道，`delete_after=interval_minutes * 60`；
+4. 发送到目标频道，`delete_after=interval_minutes * 60`，并设置 `suppress_embeds=True`（不自动解析链接，避免频道里出现大预览卡片）；
 5. 任何异常（文件不存在、频道找不到、Discord 报错）只 `print` 不中断循环。
 
 ## 可配置项
