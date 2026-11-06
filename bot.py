@@ -17,9 +17,7 @@ from channel_admin import (  # noqa: E402
     register_commands,
     start_channel_mute_restores,
 )
-from daily_bonus import start_daily_bonus  # noqa: E402
 from mama import register_commands as register_mama_commands  # noqa: E402
-from roulette import start_roulette  # noqa: E402
 
 # 消息处理器：频道 ID -> [async (message) -> None]，各模块在 start_xxx 里注册
 MessageHandler = Callable[[discord.Message], Awaitable[None]]
@@ -33,7 +31,7 @@ class SukakaBot(discord.Client):
         #   注意：message_content 只解锁消息的「内容字段」，消息「事件本身」由
         #   guild_messages 控制；Intents.default() 内含它，none() 不含，极易漏开。
         # - members：成员变更事件（成员解析 REST 兜底仍可用，无需全量缓存）
-        # - message_content：读取消息内容（游戏关键词识别必需）
+        # - message_content：读取消息内容（当前无消息类功能，为扩展预留）
         # 注意：default() 会附带 bans/emojis/integrations/webhooks/voice_states
         # 等本项目用不到的事件流，全部省掉。
         intents = discord.Intents.none()
@@ -44,8 +42,8 @@ class SukakaBot(discord.Client):
         super().__init__(
             intents=intents,
             # 不在启动时全量分块下载成员列表：万人服务器每次启动能省几十 MB 流量；
-            # 成员按需走 REST 解析（utils.resolve_member_xxx），个别场景多一次 HTTP，
-            # 但整体流量与启动速度都大幅优于全量缓存。
+            # 成员按需走 REST 解析（get_member 未命中时 fetch_member 兜底），
+            # 整体流量与启动速度都大幅优于全量缓存。
             chunk_guilds_at_startup=False,
         )
 
@@ -58,8 +56,6 @@ class SukakaBot(discord.Client):
         self._channel_mutes_started = False
         self._carousel_started = False
         self._carousel_task: Optional[asyncio.Task[None]] = None
-        self._roulette_started = False
-        self._daily_bonus_started = False
 
     async def setup_hook(self) -> None:
         register_commands(self)
@@ -86,12 +82,6 @@ class SukakaBot(discord.Client):
         if not self._carousel_started:
             self._carousel_started = True
             self._carousel_task = start_carousel(self)
-        if not self._roulette_started:
-            self._roulette_started = True
-            start_roulette(self)
-        if not self._daily_bonus_started:
-            self._daily_bonus_started = True
-            start_daily_bonus(self)
         print(f"Logged in as {self.user} ({self.user.id})")
 
 

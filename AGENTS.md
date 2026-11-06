@@ -34,7 +34,7 @@
 - 日志统一 `print()`，不用日志框架；异常就地 `try/except`，不允许异常杀死无限循环任务。
 - 只允许 `bot.py` 注册 `on_message`；消息类功能通过 `bot.register_message_handler(频道ID, 处理器)` 接入。
 - 新功能模块暴露 `start_xxx(bot)` 函数，由 `bot.py` 的 `on_ready` 启动（带幂等标志）。
-- 频道 ID 硬编码在各模块文件顶部常量（roulette 的在 `roulette/constants.py`）。
+- 频道 ID 硬编码在各模块文件顶部常量。
 - 本地 SQLite 数据库统一经 `paths.py` 的 `data_file()` 解析（默认 `data/` 目录），不要在模块里手写路径。
 - Python 版本下限见 `pyproject.toml`（>=3.13），可用 3.13+ 语法。
 

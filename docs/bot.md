@@ -1,6 +1,6 @@
 # bot.py — 主入口
 
-`bot.py` 是整个机器人的唯一启动文件（`python bot.py`），职责只有两件事：加载环境变量、把四大功能模块挂到机器人上。它本身不含任何业务逻辑。
+`bot.py` 是整个机器人的唯一启动文件（`python bot.py`），职责只有两件事：加载环境变量、把三大功能模块挂到机器人上。它本身不含任何业务逻辑。
 
 ## 文件结构
 
@@ -25,13 +25,12 @@ main()
       └── on_ready()（登录后，可能因重连多次触发）
            ├── await self.tree.sync()          # 同步斜杠命令到 Discord（仅首次）
            ├── 恢复未到期的频道禁言            # start_channel_mute_restores（读 channel_mutes.db）
-           ├── start_carousel(self)             # 轮播任务
-           └── start_roulette(self)             # 游戏区（含发言掉落、后台任务）
+           └── start_carousel(self)             # 轮播任务
 ```
 
 ### `on_ready` 的幂等保护
 
-Discord 重连时 `on_ready` 会被再次调用。每个功能都对应一个 `self._xxx_started` 布尔标志（`_synced`、`_channel_mutes_started`、`_carousel_started`、`_roulette_started`），保证任务只启动一次。**新增启动逻辑时必须沿用这个模式**，否则重连后会重复开任务（例如大红包循环会翻倍发红包）。斜杠命令注册走 `setup_hook()`（discord.py 保证每次连接只调一次），不需要幂等标志。
+Discord 重连时 `on_ready` 会被再次调用。每个功能都对应一个 `self._xxx_started` 布尔标志（`_synced`、`_channel_mutes_started`、`_carousel_started`），保证任务只启动一次。**新增启动逻辑时必须沿用这个模式**，否则重连后会重复开任务（例如轮播任务会翻倍发消息）。斜杠命令注册走 `setup_hook()`（discord.py 保证每次连接只调一次），不需要幂等标志。
 
 ## SukakaBot 的状态容器
 
@@ -43,7 +42,7 @@ Discord 重连时 `on_ready` 会被再次调用。每个功能都对应一个 `s
 | `self.mute_votes` / `self.active_vote_by_target` | channel_admin | 投票状态（内存态，重启丢失） |
 | `self._carousel_task` | carousel | 轮播任务句柄 |
 
-roulette 模块没有往 bot 上挂状态——它的冷却字典等全部闭包在 `start_roulette()` 内部。channel_admin 的频道禁言记录也不再挂状态：持久层是模块私有的 SQLite 函数（`channel_mutes.db`），恢复任务注册表与写锁是模块级私有变量。
+channel_admin 的频道禁言记录不往 bot 上挂状态：持久层是模块私有的 SQLite 函数（`channel_mutes.db`），恢复任务注册表与写锁是模块级私有变量。
 
 ## Intents 配置
 
@@ -59,12 +58,7 @@ intents.message_content = True     # 读取消息内容（游戏关键词识别�
 
 **大坑预警**：`message_content`（特权）只解锁消息事件的**内容字段**；消息**事件本身**由**非特权**的 `guild_messages` 控制。`Intents.default()` 内含 `guild_messages` 所以平时感觉不到它的存在，而 `Intents.none()` 不含——漏开后 `on_message` 完全不触发、bot 对任何消息无响应，且不报任何错。从 `default()` 换成 `none()` 起步时**必须显式补上 `guild_messages`**。
 
-另外 `SukakaBot.__init__` 里传了 `chunk_guilds_at_startup=False`：**不在启动时全量分块下载服务器成员列表**。万人服务器每次启动能省几十 MB 流量、大幅加快就绪速度。代价是 `guild.get_member()` / `guild.members` 缓存命中率低，**所有按 ID/用户名查成员的地方必须走 `roulette/utils.py` 的 REST 兜底**：
-
-- `resolve_member_by_id(guild, discord_id)`：缓存 → `guild.get_member` → `fetch_member`（REST）
-- `resolve_member_by_name(guild, username)`：缓存 → `guild.get_member_named` → REST `query_members` 前缀搜索后精确比对
-
-两者都带 5 分钟 TTL 内存缓存，避免频繁打 REST。新增「查成员」代码时一律用这两个函数，不要直接用 `guild.get_member` / `guild.members`（后者在未分块时基本是空的）。
+另外 `SukakaBot.__init__` 里传了 `chunk_guilds_at_startup=False`：**不在启动时全量分块下载服务器成员列表**。万人服务器每次启动能省几十 MB 流量、大幅加快就绪速度。代价是 `guild.get_member()` / `guild.members` 缓存命中率低，查成员要有 REST 兜底——channel_admin 的做法是 `guild.get_member(id)` 未命中时 `await guild.fetch_member(id)`。新增「查成员」代码时沿用这个模式，不要只用 `guild.get_member` / `guild.members`（后者在未分块时基本是空的）。
 
 `members` 和 `message_content` 属于特权 Intent，除了代码里声明，还必须在 [Discord 开发者后台](https://discord.com/developers/applications) → Bot → Privileged Gateway Intents 中开启，否则启动报错或收不到消息。
 
@@ -73,8 +67,6 @@ intents.message_content = True     # 读取消息内容（游戏关键词识别�
 | 变量 | 用途 | 缺失后果 |
 | --- | --- | --- |
 | `DISCORD_TOKEN` | 机器人登录凭证 | 启动直接 `RuntimeError` |
-| `ACTIVITY_QUOTA_API_KEY` | 活动额度 API 鉴权 | 启动正常，但所有额度查询/发放静默失败（游戏不可用） |
-| `ACTIVITY_QUOTA_API_BASE` | 覆盖 API 地址（默认 `https://catiecli.sukaka.top`） | 用默认值 |
 | `MUTE_WHITELIST` | 管理命令的用户 ID 白名单（逗号分隔） | 无人可用管理命令 |
 
 ## 消息分发机制（bot.py 持有唯一的 on_message）
@@ -99,7 +91,7 @@ async def on_message(self, message: discord.Message) -> None:
 
 - **`@bot.event` 是覆盖语义**（discord.py 单播），所以全项目只允许这一处 `on_message`；功能模块一律通过 `register_message_handler` 注册，bot 消息在分发前统一过滤。
 - 一个频道可以注册多个处理器（按注册顺序依次执行）；没有注册处理器的频道消息直接丢弃。
-- **`roulette`**（游戏频道 `1545664527410929745`）走这套机制。mama 已改为斜杠命令（ephemeral 响应，不监听消息）、channel_admin 用斜杠命令、carousel 用定时任务，均不参与消息分发。
+- 目前没有模块走这套机制：mama 与 channel_admin 均为斜杠命令（ephemeral 响应，不监听消息），carousel 用定时任务，均不参与消息分发。
 
 ## 新增功能模块时的改动点
 

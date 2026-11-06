@@ -17,7 +17,6 @@
 - 通过消息链接标注消息（使用 Discord 置顶消息 / Pin）
 - 通过消息链接取消标注消息（取消置顶 / Unpin）
 - 每隔一段时间从 `docs/carousel-content.md` 向指定频道循环发送消息（默认 5 分钟）
-- 「来财」关键词随机掉落活动额度：在指定频道发送「来财」随机掉落 0-100 点活动额度，每个自然日（北京时间）第一次必定掉落 200 点，单用户冷却，掉落时频道内提醒并自动删除
 
 ## 运行环境
 
@@ -39,9 +38,6 @@ pip install -r requirements.txt
 - CHANNEL_MUTES_DB：可选，频道禁言记录数据库路径，默认 `data/channel_mutes.db`
 - CAROUSEL_FILE：可选，循环消息文件路径，默认 `docs/carousel-content.md`
 - CAROUSEL_INTERVAL_MINUTES：可选，循环发送间隔（分钟），默认 `5`
-- ACTIVITY_QUOTA_API_KEY：活动额度发放专用密钥（必填，否则掉落功能不生效）
-- ACTIVITY_QUOTA_API_BASE：可选，活动额度 API 地址，默认 `https://catiecli.sukaka.top`
-- QUOTA_DROP_DB：可选，掉落冷却数据库文件路径，默认 `data/quota_drops.db`
 - DATA_DIR：可选，所有本地 SQLite 数据库的存放目录（默认 `data/`）；各模块同名环境变量指定的完整路径优先于此项
 
 示例：
@@ -56,11 +52,10 @@ MUTE_WHITELIST=123456789012345678,234567890123456789
 - 如果 MUTE_WHITELIST 为空，则没有用户可以发起投票或执行管理指令；所有成员仍可参与已有投票。
 - 机器人仅在固定频道 1293095144806940738 接收与处理指令。
 - 机器人会向频道 `1455038454772531311` 循环发送 `docs/carousel-content.md` 的内容；文件为空时跳过本轮发送。
-- 掉落功能监听指定频道的用户发言（自动过滤机器人消息），发送「来财」关键词触发：每个自然日（北京时间）第一次「来财」必定掉落 200 点；之后每次随机掉落 0-100 点（30% 概率掉 0 点，10% 概率变为扣减事件）；无论掉落几点都会进入 30-180 秒的随机冷却，冷却期间不再掉落。掉落成功时在频道内 @用户 提醒，10 秒后自动删除。冷却与每日首次记录存于 SQLite，重启后仍有效。
 
 ## 本地数据目录
 
-所有本地 SQLite 数据库集中存放在 `data/` 目录（可用 `DATA_DIR` 环境变量整体改址）；各数据库仍可通过同名环境变量指定完整路径覆盖（如 `GACHA_DB`）。迁移或备份只需处理 `data/` 一个目录。Docker 部署时建议把该目录挂载为卷以持久化数据。
+所有本地 SQLite 数据库集中存放在 `data/` 目录（可用 `DATA_DIR` 环境变量整体改址）；各数据库仍可通过同名环境变量指定完整路径覆盖（如 `CHANNEL_MUTES_DB`）。迁移或备份只需处理 `data/` 一个目录。Docker 部署时建议把该目录挂载为卷以持久化数据。
 
 ## 启动
 
@@ -147,7 +142,7 @@ https://discord.com/channels/<guild_id>/<channel_id>/<message_id>
 - Manage Messages（用于删除消息、置顶消息、取消置顶消息）
 - Manage Roles（用于修改和恢复成员在当前频道的发言权限）
 
-另外需要在 [Discord Developer Portal](https://discord.com/developers/applications) → Bot → Privileged Gateway Intents 开启 **Message Content Intent**，否则发言掉落功能无法接收消息事件。
+另外需要在 [Discord Developer Portal](https://discord.com/developers/applications) → Bot → Privileged Gateway Intents 开启 **Message Content Intent** 与 **Server Members Intent**（当前为扩展消息类功能预留）。
 
 ## 常见问题
 
@@ -175,6 +170,6 @@ https://discord.com/channels/<guild_id>/<channel_id>/<message_id>
 - paths.py：数据目录统一解析（默认 `data/`，支持 DATA_DIR 环境变量整体改址）
 - carousel.py：循环消息模块
 - channel_admin.py：频道管理指令模块
-- quota_drop.py：「来财」关键词掉落活动额度模块
+- mama.py：找妈妈（家庭组共享登记）模块
 - requirements.txt：依赖列表
 - pyproject.toml：项目元数据与依赖声明
